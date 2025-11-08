@@ -1,3 +1,8 @@
+#my ignore
+stage-1-segmentation/data/
+*.zip
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
