@@ -20,31 +20,38 @@ Skip sẽ dùng: `E0` (128×128×64), `E1` (64×64×64), `E2` (32×32×128), `E3
 - Nối [E4, các nhánh] → 8×8×(512+4×128)=8×8×1024 → Conv3×3 → BN/GN → ReLU → Dropout(0.2–0.3) → 8×8×512 = `B`
 
 #### Decoder (5 tầng với Attention Gate ở skip, scSE sau concat)
+**Lưu ý**: Tất cả upsample dùng `F.interpolate(mode='bilinear', align_corners=False)` để tránh grid misalignment.
+
 - Khối D4 (8→16):
-  - Up(B): bilinear ×2 → Conv3×3: 16×16×256
-  - Attention Gate trên skip `E3` (16×16×256) dùng tín hiệu từ nhánh decoder 16×16×256 → `E3_att`
-  - Concat [up, `E3_att`] → 16×16×512 → Conv3×3 → BN/GN → ReLU → Conv3×3 → BN/GN → ReLU → scSE → 16×16×256 = `D4`
+  - Up(B): Upsample bilinear ×2 (align_corners=False) → Conv3×3: 8×8×512 → 16×16×256
+  - Attention Gate trên skip `E3` (16×16×256) dùng tín hiệu từ nhánh decoder 16×16×256 → `E3_att` (16×16×256)
+  - Concat [upsampled, `E3_att`] → 16×16×512
+  - Conv3×3 → BN/GN → ReLU → Conv3×3 → BN/GN → ReLU → scSE(r=16) → 16×16×256 = `D4`
 
 - Khối D3 (16→32):
-  - Up(`D4`) → 32×32×128
-  - AG trên `E2` (32×32×128) → `E2_att`
-  - Concat → 32×32×256 → 2×Conv3×3 → scSE → 32×32×128 = `D3`
+  - Up(`D4`): Upsample bilinear ×2 (align_corners=False) → Conv3×3: 16×16×256 → 32×32×128
+  - AG trên `E2` (32×32×128) → `E2_att` (32×32×128)
+  - Concat [upsampled, `E2_att`] → 32×32×256
+  - Conv3×3 → BN/GN → ReLU → Conv3×3 → BN/GN → ReLU → scSE(r=16) → 32×32×128 = `D3`
 
 - Khối D2 (32→64):
-  - Up(`D3`) → 64×64×64
-  - AG trên `E1` (64×64×64) → `E1_att`
-  - Concat → 64×64×128 → 2×Conv3×3 → scSE → 64×64×64 = `D2`
+  - Up(`D3`): Upsample bilinear ×2 (align_corners=False) → Conv3×3: 32×32×128 → 64×64×64
+  - AG trên `E1` (64×64×64) → `E1_att` (64×64×64)
+  - Concat [upsampled, `E1_att`] → 64×64×128
+  - Conv3×3 → BN/GN → ReLU → Conv3×3 → BN/GN → ReLU → scSE(r=8) → 64×64×64 = `D2`
 
-- Khối D1 (64→128, dùng skip nông):
-  - Up(`D2`) → 128×128×32
-  - AG trên `E0` (128×128×64) → (tùy chọn Conv1×1 giảm kênh 64→32) → `E0_att`
-  - Concat → 128×128×64 → 2×Conv3×3 → scSE → 128×128×32 = `D1`
+- Khối D1 (64→128, dùng skip nông E0):
+  - Up(`D2`): Upsample bilinear ×2 (align_corners=False) → Conv3×3: 64×64×64 → 128×128×32
+  - Skip E0 (128×128×64) → Conv1×1(64→32) → 128×128×32 (projection bắt buộc để khớp kênh)
+  - AG trên skip đã project (128×128×32) dùng tín hiệu từ decoder 128×128×32 → `E0_att` (128×128×32)
+  - Concat [upsampled, `E0_att`] → 128×128×64
+  - Conv3×3 → BN/GN → ReLU → Conv3×3 → BN/GN → ReLU → scSE(r=8) → 128×128×32 = `D1`
 
-- Đầu ra:
-  - Up(`D1`) bilinear ×2 → 256×256×32
-  - Conv3×3 tinh chỉnh → 256×256×32
+- Đầu ra (Final Upsampling):
+  - Up(`D1`): Upsample bilinear ×2 (align_corners=False): 128×128×32 → 256×256×32
+  - Conv3×3 tinh chỉnh: 256×256×32 → 256×256×32
   - Conv1×1: 32→1 → logits 256×256×1
-  - Sigmoid khi suy luận
+  - Sigmoid activation (chỉ khi inference, training dùng logits cho BCEWithLogitsLoss)
 
 ### Attention “đúng” và tối ưu (định nghĩa ngắn gọn)
 - **Attention Gate (AG) trên skip** (theo Attention U‑Net):
