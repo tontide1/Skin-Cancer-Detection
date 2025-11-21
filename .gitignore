@@ -3,7 +3,7 @@ stage-1-segmentation/data/
 *.zip
 *.png
 *.jpg
-
+*.pth
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
