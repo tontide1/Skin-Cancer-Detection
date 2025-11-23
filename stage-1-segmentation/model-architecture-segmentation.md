@@ -3,6 +3,7 @@
 Đây là bản mô tả chi tiết về kiến trúc mô hình phân đoạn tổn thương da (Skin Lesion Segmentation) sử dụng **U-Net** với **ResNet34** làm encoder và **attention ở decoder**.
 
 Mô hình này là một mạng **Fully Convolutional Network (FCN)** có hình dạng chữ U, bao gồm 3 phần chính:
+
 1. **Encoder (Contracting Path):** Trích xuất đặc trưng đa tầng
 2. **Decoder (Expanding Path):** Khôi phục không gian và tái tạo mask
 3. **Skip Connections:** Kết nối tắt giữa encoder và decoder
@@ -12,6 +13,7 @@ Mô hình này là một mạng **Fully Convolutional Network (FCN)** có hình 
 ## 1. Tổng quan Kiến trúc
 
 ### 1.1. Thông số chính
+
 * **Đầu vào:** Ảnh màu RGB, kích thước \(H \times W \times 3\) (Ví dụ: \(256 \times 256 \times 3\))
 * **Đầu ra:** Mask phân đoạn nhị phân, kích thước \(H \times W \times 1\) (Giá trị logits cho mỗi pixel)
 * **Số tầng encoder:** 5 stages (downsampling từ 1/2 đến 1/32 so với ảnh gốc)
@@ -29,6 +31,7 @@ Encoder sử dụng **ResNet34** – một biến thể ResNet dùng **BasicBloc
 **Mục đích:** Giảm nhanh kích thước không gian để tiết kiệm tính toán.
 
 **Cấu trúc:**
+
 ```
 Input (3 channels) 
   → Conv2d(7×7, stride=2, padding=3) 
@@ -38,9 +41,10 @@ Input (3 channels)
 ```
 
 **Output:**
-- Kích thước: \(H/4 \times W/4\) (ví dụ: \(64 \times 64\))
-- Số kênh: **64**
-- Downsampling: **1/4**
+
+* Kích thước: \(H/4 \times W/4\) (ví dụ: \(64 \times 64\))
+* Số kênh: **64**
+* Downsampling: **1/4**
 
 ---
 
@@ -67,9 +71,10 @@ Input (C_in channels)
 ```
 
 **Đặc điểm:**
-- Kernel 3×3 ở cả 2 conv → rất phù hợp cho segmentation (nhận diện biên, texture).
-- Không dùng grouped conv, không SE → **ít tham số, giảm nguy cơ overfitting** trên dataset vừa (3k–5k ảnh).
-- Vẫn giữ được lợi thế **skip connection** trong từng block → gradient flow ổn định.
+
+* Kernel 3×3 ở cả 2 conv → rất phù hợp cho segmentation (nhận diện biên, texture).
+* Không dùng grouped conv, không SE → **ít tham số, giảm nguy cơ overfitting** trên dataset vừa (3k–5k ảnh).
+* Vẫn giữ được lợi thế **skip connection** trong từng block → gradient flow ổn định.
 
 ---
 
@@ -84,9 +89,10 @@ Input (C_in channels)
 | **Stage 4** (layer4) | 3 | \(16 \times 16\)  | \(8 \times 8\)   | 512 | 1/32 |
 
 **Ghi chú:**
-- **Stage 1–4** sử dụng BasicBlock như mô tả ở trên (expansion = 1).
-- **Không có SE / grouped conv** trong encoder → mô hình **nhẹ hơn SE-ResNeXt50**, dễ train hơn trên dataset vừa phải.
-- **Stage 4** vẫn là bottleneck của U-Net (feature maps kích thước nhỏ nhất, chứa nhiều thông tin ngữ nghĩa nhất).
+
+* **Stage 1–4** sử dụng BasicBlock như mô tả ở trên (expansion = 1).
+* **Không có SE / grouped conv** trong encoder → mô hình **nhẹ hơn SE-ResNeXt50**, dễ train hơn trên dataset vừa phải.
+* **Stage 4** vẫn là bottleneck của U-Net (feature maps kích thước nhỏ nhất, chứa nhiều thông tin ngữ nghĩa nhất).
 
 ---
 
@@ -127,23 +133,25 @@ Output: Refined feature maps
 ```
 
 **Ý nghĩa của từng bước:**
-- **Upsampling:** Tăng độ phân giải không gian.
-- **Attention gate:** Loại bớt background không liên quan trên skip (vùng da lành, lông, thước đo, noise).
-- **Skip connections:** Bổ sung thông tin chi tiết (edges, texture) từ encoder **nhưng đã qua attention**.
-- **Convolution:** Học cách kết hợp 2 loại thông tin (semantic + spatial details).
+
+* **Upsampling:** Tăng độ phân giải không gian.
+* **Attention gate:** Loại bớt background không liên quan trên skip (vùng da lành, lông, thước đo, noise).
+* **Skip connections:** Bổ sung thông tin chi tiết (edges, texture) từ encoder **nhưng đã qua attention**.
+* **Convolution:** Học cách kết hợp 2 loại thông tin (semantic + spatial details).
 
 #### 3.1.1. Attention Gate – Cách triển khai (Pseudo-code)
 
 **Ký hiệu:**
-- \(x\): feature từ encoder (skip), shape \((B, C_\text{enc}, H, W)\)
-- \(g\): feature từ decoder (gating), shape \((B, C_\text{dec}, H, W)\) – sau khi đã được upsample về cùng \(H, W\)
-- \(C_\text{int}\): số kênh trung gian trong attention gate (thường chọn nhỏ hơn \(C_\text{enc}, C_\text{dec}\))
+
+* \(x\): feature từ encoder (skip), shape \((B, C_\text{enc}, H, W)\)
+* \(g\): feature từ decoder (gating), shape \((B, C_\text{dec}, H, W)\) – sau khi đã được upsample về cùng \(H, W\)
+* \(C_\text{int}\): số kênh trung gian trong attention gate (thường chọn nhỏ hơn \(C_\text{enc}, C_\text{dec}\))
 
 **Công thức:**
 \[
 \begin{aligned}
-q_x &= W_x * x \quad &&\text{(Conv 1×1 giảm kênh encoder)} \\
-q_g &= W_g * g \quad &&\text{(Conv 1×1 giảm kênh decoder)} \\
+q_x &= W_x *x \quad &&\text{(Conv 1×1 giảm kênh encoder)} \\
+q_g &= W_g* g \quad &&\text{(Conv 1×1 giảm kênh decoder)} \\
 f &= \text{ReLU}(q_x + q_g) \\
 \psi &= \sigma(W_\psi * f) \quad &&\text{(Conv 1×1 rồi Sigmoid, }\psi \in [0,1]^{B\times 1\times H\times W}) \\
 x_\text{att} &= x \odot \psi \quad &&\text{(nhân theo từng phần tử, broadcast theo kênh)}
@@ -191,17 +199,19 @@ class AttentionGate(nn.Module):
 ```
 
 **Gợi ý cấu hình các block:**
-- **Decoder 4:**  
-  - \(x\): từ Stage 3, \(C_\text{enc} = 256\)  
-  - \(g\): từ Stage 4 (upsample), \(C_\text{dec} = 512\) hoặc 256 (sau Conv)  
-  - \(C_\text{int}\): 128
-- **Decoder 3:** \(C_\text{enc} = 128, C_\text{dec} = 256, C_\text{int} = 64\)
-- **Decoder 2:** \(C_\text{enc} = 64,  C_\text{dec} = 128, C_\text{int} = 32\)
-- **Decoder 1:** \(C_\text{enc} = 64,  C_\text{dec} = 64,  C_\text{int} = 32\)
+
+* **Decoder 4:**  
+  * \(x\): từ Stage 3, \(C_\text{enc} = 256\)  
+  * \(g\): từ Stage 4 (upsample), \(C_\text{dec} = 512\) hoặc 256 (sau Conv)  
+  * \(C_\text{int}\): 128
+* **Decoder 3:** \(C_\text{enc} = 128, C_\text{dec} = 256, C_\text{int} = 64\)
+* **Decoder 2:** \(C_\text{enc} = 64,  C_\text{dec} = 128, C_\text{int} = 32\)
+* **Decoder 1:** \(C_\text{enc} = 64,  C_\text{dec} = 64,  C_\text{int} = 32\)
 
 Các giá trị trên có thể điều chỉnh tùy theo số kênh thực tế bạn thiết kế trong decoder, nhưng nguyên tắc chung là:
-- \(C_\text{int}\) nhỏ hơn \(C_\text{enc}, C_\text{dec}\) để giảm chi phí tính toán.
-- Kích thước không gian \(H, W\) của \(x\) và \(g\) phải **bằng nhau** trước khi đưa vào attention gate.
+
+* \(C_\text{int}\) nhỏ hơn \(C_\text{enc}, C_\text{dec}\) để giảm chi phí tính toán.
+* Kích thước không gian \(H, W\) của \(x\) và \(g\) phải **bằng nhau** trước khi đưa vào attention gate.
 
 ---
 
@@ -216,9 +226,10 @@ Các giá trị trên có thể điều chỉnh tùy theo số kênh thực tế
 | **Decoder 0** | Decoder 1 | (none) | \(128 \times 128\) | - | \(256 \times 256\) | 16 |
 
 **Ghi chú quan trọng:**
-- **Decoder 4–1:** Có skip connections từ encoder tương ứng **và áp dụng attention gate** trước khi concatenate.
-- **Decoder 0:** Không có skip connection, chỉ upsample và convolution.
-- **Số channels giảm dần:** 256 → 128 → 64 → 32 → 16 (giảm độ phức tạp khi tiến về output).
+
+* **Decoder 4–1:** Có skip connections từ encoder tương ứng **và áp dụng attention gate** trước khi concatenate.
+* **Decoder 0:** Không có skip connection, chỉ upsample và convolution.
+* **Số channels giảm dần:** 256 → 128 → 64 → 32 → 16 (giảm độ phức tạp khi tiến về output).
 
 ---
 
@@ -227,22 +238,26 @@ Các giá trị trên có thể điều chỉnh tùy theo số kênh thực tế
 Skip connections là **cầu nối** giữa encoder và decoder, còn attention gate giúp **lọc chọn** những thông tin quan trọng trước khi truyền qua:
 
 **1. Bảo toàn thông tin chi tiết (Fine-grained details)**
-- Encoder stages gần input chứa thông tin spatial chi tiết (edges, texture).
-- Attention gate giữ lại vùng liên quan đến tổn thương, giảm background.
-- Decoder sử dụng thông tin này để vẽ biên giới chính xác.
+
+* Encoder stages gần input chứa thông tin spatial chi tiết (edges, texture).
+* Attention gate giữ lại vùng liên quan đến tổn thương, giảm background.
+* Decoder sử dụng thông tin này để vẽ biên giới chính xác.
 
 **2. Giải quyết vấn đề mất thông tin (Information loss)**
-- Các lớp downsampling trong encoder → mất thông tin không gian.
-- Skip connections → bù đắp thông tin bị mất.
-- Attention → tránh đưa quá nhiều noise từ encoder xuống decoder.
+
+* Các lớp downsampling trong encoder → mất thông tin không gian.
+* Skip connections → bù đắp thông tin bị mất.
+* Attention → tránh đưa quá nhiều noise từ encoder xuống decoder.
 
 **3. Cải thiện gradient flow**
-- Tạo đường đi ngắn hơn cho gradient → training ổn định hơn.
-- Attention giúp gradient tập trung vào vùng lesion nhiều hơn.
+
+* Tạo đường đi ngắn hơn cho gradient → training ổn định hơn.
+* Attention giúp gradient tập trung vào vùng lesion nhiều hơn.
 
 **Ví dụ cụ thể:**
-- **Stage 0 skip → Decoder 1:** Cung cấp thông tin cạnh sắc nét của tổn thương (sau khi đã suppress vùng da lành).
-- **Stage 3 skip → Decoder 4:** Cung cấp semantic context (vùng tổn thương nằm ở đâu) với attention tập trung vào vùng cần phân đoạn.
+
+* **Stage 0 skip → Decoder 1:** Cung cấp thông tin cạnh sắc nét của tổn thương (sau khi đã suppress vùng da lành).
+* **Stage 3 skip → Decoder 4:** Cung cấp semantic context (vùng tổn thương nằm ở đâu) với attention tập trung vào vùng cần phân đoạn.
 
 ---
 
@@ -263,23 +278,27 @@ Output: Logits map (256×256×1)
 ### 4.2. Đặc điểm
 
 **1. Pointwise Convolution (1×1)**
-- **Mục đích:** Chiếu 16 feature channels xuống 1 channel duy nhất
-- **Không có activation function:** Output là raw logits (giá trị thực không giới hạn)
+
+* **Mục đích:** Chiếu 16 feature channels xuống 1 channel duy nhất
+* **Không có activation function:** Output là raw logits (giá trị thực không giới hạn)
 
 **2. Output Format**
-- **Shape:** \((B, 1, H, W)\) - Batch size × 1 channel × Height × Width
-- **Giá trị:** Logits ∈ ℝ (có thể âm hoặc dương)
-- **Ý nghĩa:** 
-  - Logit > 0 → Có khả năng là tổn thương cao
-  - Logit < 0 → Có khả năng là background cao
+
+* **Shape:** \((B, 1, H, W)\) - Batch size × 1 channel × Height × Width
+* **Giá trị:** Logits ∈ ℝ (có thể âm hoặc dương)
+* **Ý nghĩa:**
+  * Logit > 0 → Có khả năng là tổn thương cao
+  * Logit < 0 → Có khả năng là background cao
 
 **3. Lý do không dùng Sigmoid trong model**
-- **Loss function:** Sử dụng `BCEWithLogitsLoss` (đã tích hợp Sigmoid bên trong)
-- **Ưu điểm:** 
-  - Numerical stability (tránh log(0) errors)
-  - Hiệu quả tính toán (kết hợp Sigmoid + BCE trong 1 operation)
+
+* **Loss function:** Sử dụng `BCEWithLogitsLoss` (đã tích hợp Sigmoid bên trong)
+* **Ưu điểm:**
+  * Numerical stability (tránh log(0) errors)
+  * Hiệu quả tính toán (kết hợp Sigmoid + BCE trong 1 operation)
 
 **4. Inference (Khi dự đoán)**
+
 ```python
 # Training: model trả về logits
 logits = model(x)  # Shape: (B, 1, H, W)
@@ -323,53 +342,63 @@ Bảng dưới đây tóm tắt luồng dữ liệu qua toàn bộ mạng (giả
 ### 6.1. Khả năng biểu diễn mạnh mẽ nhưng nhẹ
 
 **1. ResNet34 Backbone**
-- **512 channels ở bottleneck:** Đủ capacity để học semantic features phức tạp cho bài toán 3k–5k ảnh.
-- **BasicBlock với Conv 3×3:** Rất hợp với segmentation (nhạy với edges, texture).
-- **Số tham số vừa phải:** Nhẹ hơn SE-ResNeXt50 → giảm overfitting, train nhanh hơn trên 2×T4.
-- **Pretrained trên ImageNet:** Transfer learning giúp tăng tốc hội tụ và cải thiện performance.
+
+* **512 channels ở bottleneck:** Đủ capacity để học semantic features phức tạp cho bài toán 3k–5k ảnh.
+* **BasicBlock với Conv 3×3:** Rất hợp với segmentation (nhạy với edges, texture).
+* **Số tham số vừa phải:** Nhẹ hơn SE-ResNeXt50 → giảm overfitting, train nhanh hơn trên 2×T4.
+* **Pretrained trên ImageNet:** Transfer learning giúp tăng tốc hội tụ và cải thiện performance.
 
 **2. Attention trong Decoder**
-- **Attention gate trên từng skip connection:** Tự động tập trung vào vùng lesion, giảm background noise.
-- **Channel + spatial gating (gián tiếp qua conv 1×1 + Sigmoid):** Học được vùng “nên mở” và “nên tắt” trên feature maps.
-- **Lọc nhiễu hiệu quả:** Giảm ảnh hưởng của artifacts (lông, thước đo, bong bóng) ngay tại decoder.
-- **Tăng cường signal tại biên tổn thương:** Giúp mask sắc nét, đặc biệt cho lesion nhỏ hoặc biên mỏng.
+
+* **Attention gate trên từng skip connection:** Tự động tập trung vào vùng lesion, giảm background noise.
+* **Channel + spatial gating (gián tiếp qua conv 1×1 + Sigmoid):** Học được vùng “nên mở” và “nên tắt” trên feature maps.
+* **Lọc nhiễu hiệu quả:** Giảm ảnh hưởng của artifacts (lông, thước đo, bong bóng) ngay tại decoder.
+* **Tăng cường signal tại biên tổn thương:** Giúp mask sắc nét, đặc biệt cho lesion nhỏ hoặc biên mỏng.
 
 ### 6.2. Bảo toàn chi tiết không gian
 
 **Skip Connections (U-Net architecture)**
-- **Multi-scale information fusion:** Kết hợp features từ nhiều độ phân giải khác nhau
-- **Precise boundary localization:** Giữ được thông tin edges và boundaries chi tiết
-- **Gradient flow:** Giúp training stable với mạng rất sâu (50+ layers)
+
+* **Multi-scale information fusion:** Kết hợp features từ nhiều độ phân giải khác nhau
+* **Precise boundary localization:** Giữ được thông tin edges và boundaries chi tiết
+* **Gradient flow:** Giúp training stable với mạng rất sâu (50+ layers)
 
 ### 6.3. Phù hợp với bài toán phân đoạn tổn thương da
 
 **1. Xử lý texture phức tạp**
-- Tổn thương da có texture đa dạng (sần sùi, vảy, nhám)
-- Backbone CNN nhiều tầng (ResNet34) → học được nhiều texture patterns
+
+* Tổn thương da có texture đa dạng (sần sùi, vảy, nhám)
+* Backbone CNN nhiều tầng (ResNet34) → học được nhiều texture patterns
 
 **2. Phân biệt tổn thương vs artifacts**
-- Attention gate ở decoder → giảm ảnh hưởng của lông, thước đo, bong bóng.
-- Multi-scale features → hiểu context xung quanh.
+
+* Attention gate ở decoder → giảm ảnh hưởng của lông, thước đo, bong bóng.
+* Multi-scale features → hiểu context xung quanh.
 
 **3. Boundaries chính xác**
-- Skip connections → giữ được thông tin edges từ early layers
-- Critical cho medical imaging (cần segmentation chính xác)
+
+* Skip connections → giữ được thông tin edges từ early layers
+* Critical cho medical imaging (cần segmentation chính xác)
 
 ---
 
 ## 7. Thông số Mô hình
 
 ### Tổng quan
-- **Tổng số parameters:** ≈ **23M–24M parameters** (ResNet34 encoder + decoder + attention)
-- **Input size:** 256×256
-- **Output size:** Same as input (pixel-wise segmentation)
+
+* **Tổng số parameters:** ≈ **23M–24M parameters** (ResNet34 encoder + decoder + attention)
+
+* **Input size:** 256×256
+* **Output size:** Same as input (pixel-wise segmentation)
 
 ### Khuyến nghị sử dụng
-- **Training:** Mixed precision (FP16) để tiết kiệm memory
-- **Data augmentation:** Essential (rotations, flips, color jitter, elastic transforms)
-- **Loss function:** Combined loss (BCE + Dice)
-- **Optimizer:** AdamW với learning rate scheduling
-- **Batch size:** 8-16 (tùy GPU memory)
+
+* **Training:** Mixed precision (FP16) để tiết kiệm memory
+
+* **Data augmentation:** Essential (rotations, flips, color jitter, elastic transforms)
+* **Loss function:** Combined loss (BCE + Dice)
+* **Optimizer:** AdamW với learning rate scheduling
+* **Batch size:** 8-16 (tùy GPU memory)
 
 ---
 
@@ -377,32 +406,34 @@ Bảng dưới đây tóm tắt luồng dữ liệu qua toàn bộ mạng (giả
 
 ### 8.1. Lý do chọn 0.5 × BCE + 0.5 × Dice
 
-- **BCEWithLogitsLoss:**
-  - Hoạt động trên **từng pixel độc lập** (per-pixel classification).
-  - Phù hợp cho việc tối ưu xác suất / calibration (logits → xác suất).
-  - Nhưng có thể **bị lệch** khi class imbalance lớn (lesion rất nhỏ so với background).
+* **BCEWithLogitsLoss:**
+  * Hoạt động trên **từng pixel độc lập** (per-pixel classification).
+  * Phù hợp cho việc tối ưu xác suất / calibration (logits → xác suất).
+  * Nhưng có thể **bị lệch** khi class imbalance lớn (lesion rất nhỏ so với background).
 
-- **DiceLoss:**
-  - Đo trực tiếp **mức độ chồng lấp giữa vùng dự đoán và vùng ground truth** (region-level overlap).
-  - Rất **nhạy với class imbalance**, vì tính trên tổng vùng, không phải từng pixel riêng lẻ.
-  - Tối ưu trực tiếp mục tiêu giống các metric như Dice / IoU.
+* **DiceLoss:**
+  * Đo trực tiếp **mức độ chồng lấp giữa vùng dự đoán và vùng ground truth** (region-level overlap).
+  * Rất **nhạy với class imbalance**, vì tính trên tổng vùng, không phải từng pixel riêng lẻ.
+  * Tối ưu trực tiếp mục tiêu giống các metric như Dice / IoU.
 
-- **Kết hợp 0.5 / 0.5:**
-  - **BCE** giúp mô hình học tín hiệu local, ổn định gradient cho từng pixel.
-  - **Dice** buộc mô hình tối ưu theo hình dạng vùng (shape) và kích thước lesion.
-  - Hệ số 0.5–0.5 là một **điểm khởi đầu cân bằng**, phù hợp cho đa số bài toán binary segmentation, đặc biệt với Attention U-Net.
+* **Kết hợp 0.5 / 0.5:**
+  * **BCE** giúp mô hình học tín hiệu local, ổn định gradient cho từng pixel.
+  * **Dice** buộc mô hình tối ưu theo hình dạng vùng (shape) và kích thước lesion.
+  * Hệ số 0.5–0.5 là một **điểm khởi đầu cân bằng**, phù hợp cho đa số bài toán binary segmentation, đặc biệt với Attention U-Net.
 
 Trong thực tế bạn có thể tinh chỉnh:
-- Nếu lesion **rất nhỏ, class imbalance nặng** → tăng trọng số Dice:  
+
+* Nếu lesion **rất nhỏ, class imbalance nặng** → tăng trọng số Dice:  
   `loss = 0.3 * BCE + 0.7 * Dice`
-- Nếu mô hình khó hội tụ, logits rất nhiễu → tăng trọng số BCE một chút:  
+* Nếu mô hình khó hội tụ, logits rất nhiễu → tăng trọng số BCE một chút:  
   `loss = 0.7 * BCE + 0.3 * Dice`
 
 ### 8.2. Định nghĩa Dice Loss (Soft Dice)
 
 Giả sử:
-- \(p = \sigma(\text{logits})\): xác suất dự đoán sau Sigmoid, \(p \in [0,1]\)
-- \(y\): ground truth mask, \(y \in \{0,1\}\)
+
+* \(p = \sigma(\text{logits})\): xác suất dự đoán sau Sigmoid, \(p \in [0,1]\)
+* \(y\): ground truth mask, \(y \in \{0,1\}\)
 
 Soft Dice cho mỗi mẫu trong batch:
 \[
@@ -447,10 +478,11 @@ def combined_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
 ```
 
 **Yêu cầu để logic loss đúng với kiến trúc:**
-- Model **trả về logits** (không Sigmoid trong `forward`) → phù hợp với `BCEWithLogitsLoss`.
-- `dice_loss` phải **tự Sigmoid bên trong**, không Sigmoid hai lần.
-- `target` có shape giống `pred` (B, 1, H, W) và giá trị {0, 1}.
-- Khi log metric (Dice / IoU) trong validation, nên tính lại Dice trên **probs = sigmoid(logits)** với ngưỡng (thường 0.5).
+
+* Model **trả về logits** (không Sigmoid trong `forward`) → phù hợp với `BCEWithLogitsLoss`.
+* `dice_loss` phải **tự Sigmoid bên trong**, không Sigmoid hai lần.
+* `target` có shape giống `pred` (B, 1, H, W) và giá trị {0, 1}.
+* Khi log metric (Dice / IoU) trong validation, nên tính lại Dice trên **probs = sigmoid(logits)** với ngưỡng (thường 0.5).
 
 ---
 
@@ -473,17 +505,18 @@ model = smp.Unet(
 ```
 
 **Giải thích các tham số:**
-- **`encoder_name="resnet34"`**:  
-  - Dùng backbone ResNet34 pretrained ImageNet đúng như phần Encoder đã mô tả.
-- **`encoder_weights="imagenet"`**:  
-  - Load trọng số pretrained trên ImageNet cho encoder → tốt cho transfer learning trên dataset 3k–5k ảnh.
-- **`decoder_attention_type="scse"`**:  
-  - Kích hoạt **SCSE (Spatial and Channel Squeeze & Excitation)** ở từng block decoder.  
-  - Đây là attention dạng re-weighting channel + spatial, khác một chút so với attention gate trên skip, nhưng cùng ý tưởng: nhấn mạnh vùng quan trọng, giảm nhiễu.
-- **`in_channels=3`**:  
-  - Ảnh RGB đầu vào.
-- **`classes=1`**:  
-  - Phân đoạn nhị phân (lesion vs background), output 1 kênh logits như phần Segmentation Head.
+
+* **`encoder_name="resnet34"`**:  
+  * Dùng backbone ResNet34 pretrained ImageNet đúng như phần Encoder đã mô tả.
+* **`encoder_weights="imagenet"`**:  
+  * Load trọng số pretrained trên ImageNet cho encoder → tốt cho transfer learning trên dataset 3k–5k ảnh.
+* **`decoder_attention_type="scse"`**:  
+  * Kích hoạt **SCSE (Spatial and Channel Squeeze & Excitation)** ở từng block decoder.  
+  * Đây là attention dạng re-weighting channel + spatial, khác một chút so với attention gate trên skip, nhưng cùng ý tưởng: nhấn mạnh vùng quan trọng, giảm nhiễu.
+* **`in_channels=3`**:  
+  * Ảnh RGB đầu vào.
+* **`classes=1`**:  
+  * Phân đoạn nhị phân (lesion vs background), output 1 kênh logits như phần Segmentation Head.
 
 ### 9.2. Gắn với `combined_loss`
 
@@ -501,8 +534,3 @@ for images, masks in train_loader:
     loss.backward()
     optimizer.step()
 ```
-
-Như vậy, phần **Pretrained Loading**, **Attention ở decoder** và **Loss function** đều nhất quán với nhau:
-- Encoder ResNet34 pretrained.
-- Decoder có attention (SCSE trong SMP, hoặc AttentionGate custom như phần 3 nếu bạn tự cài đặt).
-- Loss là `0.5 × BCEWithLogitsLoss + 0.5 × DiceLoss` hoạt động trực tiếp trên logits của model. 
