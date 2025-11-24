@@ -1,5 +1,6 @@
 #my ignore
 stage-1-segmentation/data/
+stage-2-classification/data/
 *.zip
 *.pth
 # Byte-compiled / optimized / DLL files
