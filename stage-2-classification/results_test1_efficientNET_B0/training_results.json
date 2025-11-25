@@ -1,0 +1,41 @@
+{
+    "timestamp": "20251125_184454",
+    "fold_results": [
+        {
+            "fold": 0,
+            "best_bal_acc": 0.6420300342291942,
+            "checkpoint_path": "/kaggle/working/effnet_b0_fold0_best.pth",
+            "n_epochs_trained": 31
+        },
+        {
+            "fold": 1,
+            "best_bal_acc": 0.6319962845166551,
+            "checkpoint_path": "/kaggle/working/effnet_b0_fold1_best.pth",
+            "n_epochs_trained": 18
+        },
+        {
+            "fold": 2,
+            "best_bal_acc": 0.6522690478814726,
+            "checkpoint_path": "/kaggle/working/effnet_b0_fold2_best.pth",
+            "n_epochs_trained": 25
+        },
+        {
+            "fold": 3,
+            "best_bal_acc": 0.6801357105270205,
+            "checkpoint_path": "/kaggle/working/effnet_b0_fold3_best.pth",
+            "n_epochs_trained": 24
+        },
+        {
+            "fold": 4,
+            "best_bal_acc": 0.6893682007238616,
+            "checkpoint_path": "/kaggle/working/effnet_b0_fold4_best.pth",
+            "n_epochs_trained": 26
+        }
+    ],
+    "summary": {
+        "mean_bal_acc": 0.6591598555756407,
+        "std_bal_acc": 0.022051322909300043,
+        "best_fold": 4,
+        "best_bal_acc": 0.6893682007238616
+    }
+}

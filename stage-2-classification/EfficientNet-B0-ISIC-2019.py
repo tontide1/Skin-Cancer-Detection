@@ -1,35 +1,4 @@
-Plan dưới đây thiết kế riêng cho **EfficientNet‑B0 trên Kaggle (GPU T4x2)**, bao gồm: cấu trúc notebook, hyperparameter, training schedule và early stopping, tối ưu cho ISIC 2019 (8 lớp, ('MEL', 'NV', 'BCC', 'AK', 'BKL', 'DF', 'VASC', 'SCC'))
-
-> **Lưu ý về target mapping:**  
->
-> - 0: MEL (Melanoma) ⚠️ MALIGNANT
-> - 1: NV (Melanocytic nevus)  
-> - 2: BCC (Basal cell carcinoma) ⚠️ MALIGNANT
-> - 3: AK (Actinic keratosis)  
-> - 4: BKL (Benign keratosis)  
-> - 5: DF (Dermatofibroma)  
-> - 6: VASC (Vascular lesion)  
-> - 7: SCC (Squamous cell carcinoma) ⚠️ MALIGNANT
-
-***
-
-## 🆕 Các cải tiến mới (v2.0)
-
-| Cải tiến | Mô tả | Lý do |
-|----------|-------|-------|
-| **Focal Loss** | FL(p_t) = -α(1-p_t)^γ * log(p_t) với γ=2.0 | Giảm loss cho easy examples, tập trung vào hard examples |
-| **Class-balanced Sampling** | WeightedRandomSampler với weight = 1/class_count | Đảm bảo minority classes được train đủ |
-| **Malignant Boost** | Tăng class weight x1.5 cho MEL, BCC, SCC | Tăng penalty cho sai sót trên ung thư ác tính |
-| **SCC Extra Boost** | Tăng thêm x2.0 cho SCC | SCC có performance thấp nhất trong các malignant |
-| **Threshold Optimization** | Tìm optimal threshold per class (F1 & Recall strategies) | Cải thiện predictions post-training |
-
-***
-
-## 1. Cấu trúc notebook & config chung  
-
-**Cell 1 – Imports & config**
-
-```python
+# %%
 import os
 import cv2
 import json
@@ -41,7 +10,7 @@ from dataclasses import dataclass
 
 import torch
 import torch.nn as nn
-from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler  # 🆕 Thêm WeightedRandomSampler
+from torch.utils.data import Dataset, DataLoader, WeightedRandomSampler
 from torch.cuda.amp import autocast, GradScaler
 
 import timm
@@ -72,14 +41,8 @@ if torch.cuda.is_available():
     print(f"GPU count: {torch.cuda.device_count()}")
     for i in range(torch.cuda.device_count()):
         print(f"  GPU {i}: {torch.cuda.get_device_name(i)}")
-```
 
-- Đặt đường dẫn:  
-  - `CSV_PATH = "/kaggle/input/isic-2019-task-1/ISIC_2019_5folds_metadata.csv"`  
-  - `IMG_ROOT = "/kaggle/input/isic-2019-task-1/cropped_lesions/cropped_lesions"`
-- Config (dùng dataclass cho type hints):  
-
-```python
+# %%
 @dataclass
 class Config:
     # Paths - Training
@@ -114,15 +77,15 @@ class Config:
     # Label Smoothing - Thêm để giảm overfitting
     LABEL_SMOOTHING: float = 0.1
     
-    # 🆕 Focal Loss parameters
+    # Focal Loss parameters - MỚI
     USE_FOCAL_LOSS: bool = True
     FOCAL_ALPHA: float = 1.0  # Weighting factor
     FOCAL_GAMMA: float = 2.0  # Focusing parameter (giảm loss cho easy examples)
     
-    # 🆕 Class-balanced Sampling
+    # Class-balanced Sampling - MỚI
     USE_CLASS_BALANCED_SAMPLING: bool = True
     
-    # 🆕 Malignant class boost (tăng weight cho các class ác tính)
+    # Malignant class boost - MỚI (tăng weight cho các class ác tính)
     MALIGNANT_BOOST: float = 1.5  # Boost weight cho MEL, BCC, SCC
     SCC_EXTRA_BOOST: float = 2.0  # Boost thêm cho SCC vì performance thấp nhất
     
@@ -133,7 +96,7 @@ class Config:
     
     # Class names (index 0-7)
     CLASS_NAMES: tuple = ('MEL', 'NV', 'BCC', 'AK', 'BKL', 'DF', 'VASC', 'SCC')
-    # 🆕 Malignant indices: MEL=0, BCC=2, SCC=7
+    # Malignant indices: MEL=0, BCC=2, SCC=7
     MALIGNANT_INDICES: tuple = (0, 2, 7)
 
 cfg = Config()
@@ -156,15 +119,8 @@ print(f"SCC Extra Boost: {cfg.SCC_EXTRA_BOOST}x")
 print(f"Epochs: {cfg.EPOCHS}")
 print(f"Device: {cfg.DEVICE}")
 print("="*50)
-```  
 
-***
-
-## 2. Chuẩn bị dữ liệu, class weight với Malignant Boost, Dataset  
-
-**Cell 2 – Đọc CSV & tính class weight với MALIGNANT BOOST** 🆕
-
-```python
+# %%
 # Đọc CSV
 df = pd.read_csv(cfg.CSV_PATH)
 print(f"Dataset size: {len(df)}")
@@ -178,7 +134,7 @@ N = len(df)
 weights = N / counts
 weights = weights / weights.mean()  # normalize để tránh gradient explosion
 
-# 🆕 Áp dụng Malignant Boost cho MEL, BCC, SCC
+# Áp dụng Malignant Boost cho MEL, BCC, SCC
 print(f"\n{'='*50}")
 print("APPLYING MALIGNANT CLASS BOOST")
 print(f"{'='*50}")
@@ -188,7 +144,7 @@ for idx in cfg.MALIGNANT_INDICES:
     weights[idx] *= cfg.MALIGNANT_BOOST
     print(f"  {cfg.CLASS_NAMES[idx]}: {original_weights[idx]:.4f} -> {weights[idx]:.4f} (x{cfg.MALIGNANT_BOOST})")
 
-# 🆕 Áp dụng SCC Extra Boost (index 7)
+# Áp dụng SCC Extra Boost (index 7)
 scc_idx = 7
 weights[scc_idx] *= cfg.SCC_EXTRA_BOOST
 print(f"  SCC extra boost: {weights[scc_idx]/cfg.SCC_EXTRA_BOOST:.4f} -> {weights[scc_idx]:.4f} (x{cfg.SCC_EXTRA_BOOST})")
@@ -200,7 +156,7 @@ for i, (name, w) in enumerate(zip(cfg.CLASS_NAMES, weights)):
     malignant_marker = "⚠️ MALIGNANT" if i in cfg.MALIGNANT_INDICES else ""
     print(f"  {i}: {name} = {w:.4f} {malignant_marker}")
 
-# 🆕 Tính sample weights cho Class-balanced Sampling
+# Tính sample weights cho Class-balanced Sampling
 sample_weights = 1.0 / counts[df['target'].values]
 sample_weights = sample_weights / sample_weights.sum()  # normalize to probability
 print(f"\nSample weights computed for {len(sample_weights)} samples")
@@ -208,13 +164,8 @@ print(f"\nSample weights computed for {len(sample_weights)} samples")
 # Kiểm tra fold distribution
 print(f"\nFold distribution:")
 print(df['fold'].value_counts().sort_index())
-```
 
-**Cell 3 – Dataset & augment (mạnh hơn)**
-
-- Dùng Albumentations với augmentation mạnh hơn cho chống overfitting:
-
-```python
+# %%
 def get_train_transforms(img_size):
     """Augmentation mạnh hơn để chống overfitting"""
     return A.Compose([
@@ -252,11 +203,8 @@ def get_val_transforms(img_size):
         A.Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
         ToTensorV2(),
     ])
-```
 
-- `ISICDataset`:
 
-```python
 class ISICDataset(Dataset):
     def __init__(self, df, transforms=None, img_root=None):
         self.df = df.reset_index(drop=True)
@@ -283,15 +231,17 @@ class ISICDataset(Dataset):
         target = torch.tensor(row["target"], dtype=torch.long)
         
         return image, target
-```
 
-***
 
-## 3. Model EfficientNet‑B0 + Focal Loss 🆕
+# Test dataset
+print("Testing dataset...")
+test_dataset = ISICDataset(df.head(5), get_val_transforms(cfg.IMG_SIZE), cfg.IMG_ROOT)
+img, target = test_dataset[0]
+print(f"Image shape: {img.shape}")
+print(f"Target: {target} ({cfg.CLASS_NAMES[target]})")
+print("✓ Dataset working correctly!")
 
-**Cell 4 – Model factory**
-
-```python
+# %%
 def create_model(cfg, use_dp=True):
     """Tạo model với optional DataParallel wrapper"""
     model = timm.create_model(
@@ -323,11 +273,19 @@ def get_scheduler(optimizer, cfg, num_train_steps):
         return max(cfg.MIN_LR / cfg.BASE_LR, 0.5 * (1.0 + np.cos(np.pi * progress)))
     
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
-```
 
-**Cell 5 – Focal Loss & Criterion Selection** 🆕
 
-```python
+# Test model creation
+print("Testing model creation...")
+test_model = create_model(cfg, use_dp=True)
+n_params = sum(p.numel() for p in test_model.parameters())
+print(f"Model: {cfg.MODEL_NAME}")
+print(f"Parameters: {n_params:,}")
+del test_model
+torch.cuda.empty_cache()
+print("✓ Model factory working correctly!")
+
+# %%
 # ==================== FOCAL LOSS ====================
 class FocalLoss(nn.Module):
     """
@@ -392,15 +350,7 @@ else:
     print(f"✓ Using CrossEntropyLoss with label_smoothing={cfg.LABEL_SMOOTHING}")
 
 print(f"✓ Class weights applied: {class_weight.cpu().numpy().round(4)}")
-```
 
-***
-
-## 4. Training schedule + Class-balanced Sampling + Early stopping  
-
-**Cell 5 (cont.) – Hàm train_one_fold(fold) với Class-balanced Sampling** 🆕
-
-```python
 def train_one_fold(fold, df, cfg):
     print(f"\n{'='*50}")
     print(f"FOLD {fold}")
@@ -416,7 +366,7 @@ def train_one_fold(fold, df, cfg):
     train_dataset = ISICDataset(train_df, get_train_transforms(cfg.IMG_SIZE), cfg.IMG_ROOT)
     val_dataset = ISICDataset(val_df, get_val_transforms(cfg.IMG_SIZE), cfg.IMG_ROOT)
     
-    # 🆕 ========== CLASS-BALANCED SAMPLING ==========
+    # ========== CLASS-BALANCED SAMPLING ==========
     if cfg.USE_CLASS_BALANCED_SAMPLING:
         # Tính class counts cho training fold
         train_counts = train_df['target'].value_counts().sort_index().values
@@ -597,11 +547,8 @@ def train_one_fold(fold, df, cfg):
         'oof_images': oof_images,
         'history': history,
     }
-```
 
-**Cell 6 – Chạy 5 folds**
-
-```python
+# %%
 # Chạy training cho tất cả folds
 results = []
 all_oof = []
@@ -629,27 +576,151 @@ print(f"{'='*50}")
 for i, acc in enumerate(bal_accs):
     print(f"Fold {i}: {acc:.4f}")
 print(f"Mean: {np.mean(bal_accs):.4f} ± {np.std(bal_accs):.4f}")
-```
 
-**Cell 6.1 – Visualization Training History**
+# %%
+def plot_training_history(all_histories, cfg, save_path=None):
+    """Vẽ biểu đồ training history cho tất cả folds"""
+    
+    fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+    colors = plt.cm.tab10(np.linspace(0, 1, cfg.N_FOLDS))
+    
+    # 1. Training Loss
+    ax1 = axes[0, 0]
+    for fold, history in enumerate(all_histories):
+        ax1.plot(history['epoch'], history['train_loss'], 
+                 label=f'Fold {fold}', color=colors[fold], alpha=0.8)
+    ax1.set_xlabel('Epoch')
+    ax1.set_ylabel('Training Loss')
+    ax1.set_title('Training Loss per Fold')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
+    
+    # 2. Validation Loss
+    ax2 = axes[0, 1]
+    for fold, history in enumerate(all_histories):
+        ax2.plot(history['epoch'], history['val_loss'], 
+                 label=f'Fold {fold}', color=colors[fold], alpha=0.8)
+    ax2.set_xlabel('Epoch')
+    ax2.set_ylabel('Validation Loss')
+    ax2.set_title('Validation Loss per Fold')
+    ax2.legend()
+    ax2.grid(True, alpha=0.3)
+    
+    # 3. Balanced Accuracy
+    ax3 = axes[1, 0]
+    for fold, history in enumerate(all_histories):
+        ax3.plot(history['epoch'], history['bal_acc'], 
+                 label=f'Fold {fold}', color=colors[fold], alpha=0.8)
+    ax3.set_xlabel('Epoch')
+    ax3.set_ylabel('Balanced Accuracy')
+    ax3.set_title('Balanced Accuracy per Fold')
+    ax3.legend()
+    ax3.grid(True, alpha=0.3)
+    
+    # 4. Learning Rate
+    ax4 = axes[1, 1]
+    for fold, history in enumerate(all_histories):
+        ax4.plot(history['epoch'], history['learning_rate'], 
+                 label=f'Fold {fold}', color=colors[fold], alpha=0.8)
+    ax4.set_xlabel('Epoch')
+    ax4.set_ylabel('Learning Rate')
+    ax4.set_title('Learning Rate Schedule')
+    ax4.legend()
+    ax4.grid(True, alpha=0.3)
+    ax4.set_yscale('log')
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"✓ Saved training history plot to {save_path}")
+    
+    plt.show()
 
-(Giữ nguyên như trước - không thay đổi)
 
-***
+def plot_fold_comparison(results, cfg, save_path=None):
+    """Vẽ biểu đồ so sánh performance giữa các folds"""
+    
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    
+    # 1. Bar chart - Balanced Accuracy per fold
+    ax1 = axes[0]
+    folds = [r['fold'] for r in results]
+    bal_accs = [r['best_bal_acc'] for r in results]
+    bars = ax1.bar(folds, bal_accs, color=plt.cm.viridis(np.linspace(0.3, 0.9, len(folds))))
+    ax1.axhline(y=np.mean(bal_accs), color='red', linestyle='--', 
+                label=f'Mean: {np.mean(bal_accs):.4f}')
+    ax1.set_xlabel('Fold')
+    ax1.set_ylabel('Balanced Accuracy')
+    ax1.set_title('Balanced Accuracy per Fold')
+    ax1.set_xticks(folds)
+    ax1.legend()
+    ax1.grid(True, alpha=0.3, axis='y')
+    
+    # Thêm giá trị lên mỗi bar
+    for bar, acc in zip(bars, bal_accs):
+        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.005, 
+                 f'{acc:.4f}', ha='center', va='bottom', fontsize=10)
+    
+    # 2. Box plot
+    ax2 = axes[1]
+    ax2.boxplot(bal_accs, patch_artist=True,
+                boxprops=dict(facecolor='lightblue', color='blue'),
+                medianprops=dict(color='red', linewidth=2))
+    ax2.scatter([1]*len(bal_accs), bal_accs, color='blue', alpha=0.6, s=100, zorder=5)
+    ax2.set_ylabel('Balanced Accuracy')
+    ax2.set_title(f'Distribution of Balanced Accuracy\nMean: {np.mean(bal_accs):.4f} ± {np.std(bal_accs):.4f}')
+    ax2.grid(True, alpha=0.3, axis='y')
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"✓ Saved fold comparison plot to {save_path}")
+    
+    plt.show()
 
-## 5. OOF predictions, Threshold Optimization & Inference  
 
-**Cell 7 – Sinh OOF & Đánh giá chi tiết**
+# Vẽ biểu đồ
+plot_training_history(all_histories, cfg, save_path=os.path.join(cfg.OUTPUT_DIR, 'training_history.png'))
+plot_fold_comparison(results, cfg, save_path=os.path.join(cfg.OUTPUT_DIR, 'fold_comparison.png'))
 
-(Giữ nguyên như trước)
+# %%
+# Concat tất cả OOF predictions
+oof_df = pd.concat(all_oof, ignore_index=True)
+oof_df.to_csv(os.path.join(cfg.OUTPUT_DIR, 'oof_effnet_b0.csv'), index=False)
 
-**Cell 7.1 – Visualization OOF Results**
+# Tính OOF balanced accuracy tổng
+oof_preds_class = oof_df[[f'prob_{i}' for i in range(cfg.N_CLASSES)]].values.argmax(axis=1)
+oof_bal_acc = balanced_accuracy_score(oof_df['target'], oof_preds_class)
+print(f"\nOOF Balanced Accuracy: {oof_bal_acc:.4f}")
 
-(Giữ nguyên như trước)
+# Classification report
+print("\nClassification Report:")
+print(classification_report(
+    oof_df['target'], 
+    oof_preds_class, 
+    target_names=cfg.CLASS_NAMES
+))
 
-**Cell 7.2 – Threshold Optimization per Class** 🆕
+# ROC-AUC từng lớp (One-vs-Rest)
+print("\nPer-class ROC-AUC:")
+for i, class_name in enumerate(cfg.CLASS_NAMES):
+    y_true_binary = (oof_df['target'] == i).astype(int)
+    y_prob = oof_df[f'prob_{i}'].values
+    try:
+        auc_score = roc_auc_score(y_true_binary, y_prob)
+        malignant = "⚠️ MALIGNANT" if class_name in ['MEL', 'BCC', 'SCC'] else ""
+        print(f"  {class_name}: {auc_score:.4f} {malignant}")
+    except:
+        print(f"  {class_name}: N/A (only one class present)")
 
-```python
+# Confusion matrix
+cm = confusion_matrix(oof_df['target'], oof_preds_class)
+print("\nConfusion Matrix:")
+print(cm)
+
+# %%
 # ==================== THRESHOLD OPTIMIZATION PER CLASS ====================
 from sklearn.metrics import precision_recall_curve, f1_score
 
@@ -844,19 +915,264 @@ thresholds_path = os.path.join(cfg.OUTPUT_DIR, 'optimal_thresholds.json')
 with open(thresholds_path, 'w') as f:
     json.dump(thresholds_output, f, indent=4)
 print(f"\n✓ Saved optimal thresholds to {thresholds_path}")
-```
 
-**Cell 8 – Inference test (ensemble 5 folds) + TTA**
 
-(Giữ nguyên như trước)
+# %%
+def plot_confusion_matrix(cm, class_names, save_path=None):
+    """Vẽ confusion matrix với heatmap"""
+    
+    fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+    
+    # 1. Confusion matrix (counts)
+    ax1 = axes[0]
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                xticklabels=class_names, yticklabels=class_names, ax=ax1)
+    ax1.set_xlabel('Predicted')
+    ax1.set_ylabel('True')
+    ax1.set_title('Confusion Matrix (Counts)')
+    
+    # 2. Confusion matrix (normalized)
+    ax2 = axes[1]
+    cm_normalized = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
+    sns.heatmap(cm_normalized, annot=True, fmt='.2%', cmap='Blues',
+                xticklabels=class_names, yticklabels=class_names, ax=ax2)
+    ax2.set_xlabel('Predicted')
+    ax2.set_ylabel('True')
+    ax2.set_title('Confusion Matrix (Normalized)')
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"✓ Saved confusion matrix plot to {save_path}")
+    
+    plt.show()
 
-**Cell 9 – Chạy inference trên Test Set**
 
-(Giữ nguyên như trước)
+def plot_roc_curves(oof_df, cfg, save_path=None):
+    """Vẽ ROC curves cho từng class"""
+    
+    fig, ax = plt.subplots(figsize=(10, 8))
+    colors = plt.cm.tab10(np.linspace(0, 1, cfg.N_CLASSES))
+    
+    for i, class_name in enumerate(cfg.CLASS_NAMES):
+        y_true_binary = (oof_df['target'] == i).astype(int)
+        y_prob = oof_df[f'prob_{i}'].values
+        
+        if y_true_binary.sum() > 0:
+            fpr, tpr, _ = roc_curve(y_true_binary, y_prob)
+            roc_auc = auc(fpr, tpr)
+            
+            marker = '⚠️' if class_name in ['MEL', 'BCC', 'SCC'] else ''
+            ax.plot(fpr, tpr, color=colors[i], lw=2,
+                    label=f'{class_name} {marker}(AUC = {roc_auc:.3f})')
+    
+    ax.plot([0, 1], [0, 1], 'k--', lw=2, label='Random')
+    ax.set_xlim([0.0, 1.0])
+    ax.set_ylim([0.0, 1.05])
+    ax.set_xlabel('False Positive Rate')
+    ax.set_ylabel('True Positive Rate')
+    ax.set_title('ROC Curves (One-vs-Rest)')
+    ax.legend(loc='lower right')
+    ax.grid(True, alpha=0.3)
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"✓ Saved ROC curves plot to {save_path}")
+    
+    plt.show()
 
-**Cell 10 – Lưu toàn bộ Config và Results (cập nhật)** 🆕
 
-```python
+def plot_class_distribution(oof_df, cfg, save_path=None):
+    """Vẽ phân phối class trong predictions vs ground truth"""
+    
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    
+    pred_classes = oof_df[[f'prob_{i}' for i in range(cfg.N_CLASSES)]].values.argmax(axis=1)
+    
+    # 1. Ground truth distribution
+    ax1 = axes[0]
+    true_counts = oof_df['target'].value_counts().sort_index()
+    ax1.bar(cfg.CLASS_NAMES, true_counts.values, color='steelblue', alpha=0.8)
+    ax1.set_xlabel('Class')
+    ax1.set_ylabel('Count')
+    ax1.set_title('Ground Truth Distribution')
+    ax1.tick_params(axis='x', rotation=45)
+    ax1.grid(True, alpha=0.3, axis='y')
+    
+    # 2. Prediction distribution
+    ax2 = axes[1]
+    pred_counts = pd.Series(pred_classes).value_counts().sort_index()
+    pred_counts_full = [pred_counts.get(i, 0) for i in range(cfg.N_CLASSES)]
+    ax2.bar(cfg.CLASS_NAMES, pred_counts_full, color='coral', alpha=0.8)
+    ax2.set_xlabel('Class')
+    ax2.set_ylabel('Count')
+    ax2.set_title('Prediction Distribution')
+    ax2.tick_params(axis='x', rotation=45)
+    ax2.grid(True, alpha=0.3, axis='y')
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"✓ Saved class distribution plot to {save_path}")
+    
+    plt.show()
+
+
+# Vẽ các biểu đồ
+plot_confusion_matrix(cm, cfg.CLASS_NAMES, save_path=os.path.join(cfg.OUTPUT_DIR, 'confusion_matrix.png'))
+plot_roc_curves(oof_df, cfg, save_path=os.path.join(cfg.OUTPUT_DIR, 'roc_curves.png'))
+plot_class_distribution(oof_df, cfg, save_path=os.path.join(cfg.OUTPUT_DIR, 'class_distribution.png'))
+
+# %%
+def tta_predict(model, image, val_transforms, device):
+    """Test Time Augmentation với flip"""
+    model.eval()
+    preds = []
+    
+    with torch.no_grad():
+        # Original
+        img = val_transforms(image=image)["image"].unsqueeze(0).to(device)
+        with autocast():
+            preds.append(torch.softmax(model(img), dim=1))
+        
+        # Horizontal flip
+        img_hflip = val_transforms(image=cv2.flip(image, 1))["image"].unsqueeze(0).to(device)
+        with autocast():
+            preds.append(torch.softmax(model(img_hflip), dim=1))
+        
+        # Vertical flip
+        img_vflip = val_transforms(image=cv2.flip(image, 0))["image"].unsqueeze(0).to(device)
+        with autocast():
+            preds.append(torch.softmax(model(img_vflip), dim=1))
+    
+    return torch.stack(preds).mean(dim=0)
+
+
+def inference_test(test_csv_path, test_img_root, cfg, use_tta=True):
+    """Inference với ensemble 5 folds + optional TTA"""
+    test_df = pd.read_csv(test_csv_path)
+    val_transforms = get_val_transforms(cfg.IMG_SIZE)
+    
+    print(f"\n{'='*50}")
+    print(f"TEST SET INFERENCE")
+    print(f"{'='*50}")
+    print(f"Test samples: {len(test_df)}")
+    print(f"Test images folder: {test_img_root}")
+    print(f"Using TTA: {use_tta}")
+    
+    # Load 5 models
+    models = []
+    for fold in range(cfg.N_FOLDS):
+        model = create_model(cfg, use_dp=True)
+        
+        checkpoint_path = os.path.join(cfg.OUTPUT_DIR, f"effnet_b0_fold{fold}_best.pth")
+        checkpoint = torch.load(checkpoint_path, map_location=cfg.DEVICE, weights_only=False)
+        
+        # Handle DataParallel state_dict
+        state_dict = checkpoint['model_state_dict']
+        if isinstance(model, nn.DataParallel):
+            if not any(k.startswith('module.') for k in state_dict.keys()):
+                state_dict = {f'module.{k}': v for k, v in state_dict.items()}
+        else:
+            if any(k.startswith('module.') for k in state_dict.keys()):
+                state_dict = {k.replace('module.', ''): v for k, v in state_dict.items()}
+        
+        model.load_state_dict(state_dict)
+        model.eval()
+        models.append(model)
+        print(f"  ✓ Loaded fold {fold} (best_bal_acc: {checkpoint['best_bal_acc']:.4f})")
+    
+    print(f"Loaded {len(models)} fold models")
+    
+    # Predict
+    all_preds = []
+    all_images = []
+    
+    for idx in tqdm(range(len(test_df)), desc="Inference on Test Set"):
+        row = test_df.iloc[idx]
+        
+        img_path = os.path.join(test_img_root, os.path.basename(row["path"]))
+        image = cv2.imread(img_path)
+        
+        if image is None:
+            print(f"Warning: Cannot read image {img_path}")
+            continue
+            
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        all_images.append(row['image'])
+        
+        # Ensemble predictions từ 5 folds
+        fold_preds = []
+        for model in models:
+            if use_tta:
+                pred = tta_predict(model, image, val_transforms, cfg.DEVICE)
+            else:
+                img_tensor = val_transforms(image=image)["image"].unsqueeze(0).to(cfg.DEVICE)
+                with torch.no_grad(), autocast():
+                    pred = torch.softmax(model(img_tensor), dim=1)
+            fold_preds.append(pred)
+        
+        # Average across folds
+        avg_pred = torch.stack(fold_preds).mean(dim=0).cpu().numpy()[0]
+        all_preds.append(avg_pred)
+    
+    all_preds = np.array(all_preds)
+    pred_classes = all_preds.argmax(axis=1)
+    
+    # Tạo submission DataFrame
+    submission = pd.DataFrame({
+        'image': all_images,
+        **{f'prob_{i}': all_preds[:, i] for i in range(cfg.N_CLASSES)},
+        'pred': pred_classes,
+        'pred_label': [cfg.CLASS_NAMES[p] for p in pred_classes]
+    })
+    
+    # Lưu predictions
+    output_path = os.path.join(cfg.OUTPUT_DIR, 'effnet_b0_test_predictions.csv')
+    submission.to_csv(output_path, index=False)
+    print(f"\n✓ Saved test predictions to {output_path}")
+    
+    # Thống kê predictions
+    print(f"\nTest Set Prediction Distribution:")
+    for i, class_name in enumerate(cfg.CLASS_NAMES):
+        count = (pred_classes == i).sum()
+        pct = count / len(pred_classes) * 100
+        print(f"  {class_name}: {count} ({pct:.1f}%)")
+    
+    # Cleanup
+    for model in models:
+        del model
+    torch.cuda.empty_cache()
+    
+    return submission
+
+# %%
+# ====== CHẠY INFERENCE TRÊN TEST SET ======
+print("\n" + "="*60)
+print("STEP: INFERENCE ON TEST SET")
+print("="*60)
+
+# Chạy inference với TTA
+test_submission = inference_test(
+    test_csv_path=cfg.TEST_CSV_PATH,
+    test_img_root=cfg.TEST_IMG_ROOT,
+    cfg=cfg,
+    use_tta=True
+)
+
+print("\n" + "="*60)
+print("TRAINING & INFERENCE COMPLETED!")
+print("="*60)
+print(f"\nOutput files:")
+print(f"  - OOF predictions: {cfg.OUTPUT_DIR}/oof_effnet_b0.csv")
+print(f"  - Test predictions: {cfg.OUTPUT_DIR}/effnet_b0_test_predictions.csv")
+print(f"  - Model checkpoints: {cfg.OUTPUT_DIR}/effnet_b0_fold*_best.pth")
+
+# %%
 def save_experiment_results(cfg, results, all_histories, oof_df, test_submission, save_dir):
     """Lưu toàn bộ config, kết quả training/val và test"""
     
@@ -899,76 +1215,202 @@ def save_experiment_results(cfg, results, all_histories, oof_df, test_submission
         }
     }
     
-    # ... (phần còn lại giữ nguyên)
-```
+    config_path = os.path.join(save_dir, 'experiment_config.json')
+    with open(config_path, 'w') as f:
+        json.dump(config_dict, f, indent=4)
+    print(f"✓ Saved config to {config_path}")
+    
+    # 2. Lưu Training Results
+    training_results = {
+        'timestamp': timestamp,
+        'fold_results': [],
+        'summary': {
+            'mean_bal_acc': float(np.mean([r['best_bal_acc'] for r in results])),
+            'std_bal_acc': float(np.std([r['best_bal_acc'] for r in results])),
+            'best_fold': int(np.argmax([r['best_bal_acc'] for r in results])),
+            'best_bal_acc': float(max([r['best_bal_acc'] for r in results])),
+        }
+    }
+    
+    for r in results:
+        training_results['fold_results'].append({
+            'fold': r['fold'],
+            'best_bal_acc': float(r['best_bal_acc']),
+            'checkpoint_path': r['checkpoint_path'],
+            'n_epochs_trained': len(r['history']['epoch']),
+        })
+    
+    results_path = os.path.join(save_dir, 'training_results.json')
+    with open(results_path, 'w') as f:
+        json.dump(training_results, f, indent=4)
+    print(f"✓ Saved training results to {results_path}")
+    
+    # 3. Lưu Training History
+    all_history_dfs = []
+    for fold, history in enumerate(all_histories):
+        history_df = pd.DataFrame(history)
+        history_df['fold'] = fold
+        all_history_dfs.append(history_df)
+    
+    combined_history = pd.concat(all_history_dfs, ignore_index=True)
+    history_path = os.path.join(save_dir, 'training_history.csv')
+    combined_history.to_csv(history_path, index=False)
+    print(f"✓ Saved training history to {history_path}")
+    
+    # 4. Lưu OOF Metrics
+    oof_preds_class = oof_df[[f'prob_{i}' for i in range(cfg.N_CLASSES)]].values.argmax(axis=1)
+    
+    oof_metrics = {
+        'timestamp': timestamp,
+        'overall': {
+            'balanced_accuracy': float(balanced_accuracy_score(oof_df['target'], oof_preds_class)),
+            'total_samples': len(oof_df),
+        },
+        'per_class': {}
+    }
+    
+    for i, class_name in enumerate(cfg.CLASS_NAMES):
+        y_true_binary = (oof_df['target'] == i).astype(int)
+        y_prob = oof_df[f'prob_{i}'].values
+        y_pred_binary = (oof_preds_class == i).astype(int)
+        
+        tp = ((y_true_binary == 1) & (y_pred_binary == 1)).sum()
+        fp = ((y_true_binary == 0) & (y_pred_binary == 1)).sum()
+        fn = ((y_true_binary == 1) & (y_pred_binary == 0)).sum()
+        
+        precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+        recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+        
+        try:
+            auc_score = float(roc_auc_score(y_true_binary, y_prob))
+        except:
+            auc_score = None
+        
+        oof_metrics['per_class'][class_name] = {
+            'support': int(y_true_binary.sum()),
+            'precision': float(precision),
+            'recall': float(recall),
+            'f1_score': float(f1),
+            'roc_auc': auc_score,
+            'is_malignant': class_name in ['MEL', 'BCC', 'SCC'],
+        }
+    
+    oof_metrics_path = os.path.join(save_dir, 'oof_metrics.json')
+    with open(oof_metrics_path, 'w') as f:
+        json.dump(oof_metrics, f, indent=4)
+    print(f"✓ Saved OOF metrics to {oof_metrics_path}")
+    
+    # 5. Lưu Test Results
+    if test_submission is not None:
+        test_results = {
+            'timestamp': timestamp,
+            'total_samples': len(test_submission),
+            'prediction_distribution': {}
+        }
+        
+        pred_classes = test_submission['pred'].values
+        for i, class_name in enumerate(cfg.CLASS_NAMES):
+            count = int((pred_classes == i).sum())
+            pct = count / len(pred_classes) * 100
+            test_results['prediction_distribution'][class_name] = {
+                'count': count,
+                'percentage': round(pct, 2)
+            }
+        
+        test_results_path = os.path.join(save_dir, 'test_results.json')
+        with open(test_results_path, 'w') as f:
+            json.dump(test_results, f, indent=4)
+        print(f"✓ Saved test results to {test_results_path}")
+    
+    # 6. Summary Report
+    summary_report = f"""
+{'='*60}
+EXPERIMENT SUMMARY REPORT
+{'='*60}
+Timestamp: {timestamp}
+Model: {cfg.MODEL_NAME}
 
-***
+CONFIGURATION:
+- Image Size: {cfg.IMG_SIZE}
+- Batch Size: {cfg.BATCH_SIZE}
+- Learning Rate: {cfg.BASE_LR}
+- Weight Decay: {cfg.WEIGHT_DECAY}
+- Epochs: {cfg.EPOCHS} (min: {cfg.MIN_EPOCHS}, patience: {cfg.PATIENCE})
+- Dropout Rate: {cfg.DROP_RATE}
+- Warmup Epochs: {cfg.WARMUP_EPOCHS}
 
-## 6. Tổng kết các điểm quan trọng (CẬP NHẬT)
+TRAINING RESULTS (5-Fold CV):
+- Mean Balanced Accuracy: {training_results['summary']['mean_bal_acc']:.4f} ± {training_results['summary']['std_bal_acc']:.4f}
+- Best Fold: {training_results['summary']['best_fold']} ({training_results['summary']['best_bal_acc']:.4f})
 
-| Config | Giá trị | Lý do |
-|--------|---------|-------|
-| `IMG_SIZE` | 256 | Capture chi tiết texture da tốt hơn 224 |
-| `DROP_RATE` | 0.4 | Regularization mạnh hơn (tăng từ 0.3) |
-| `BATCH_SIZE` | 64 | Tận dụng T4x2, tăng training throughput |
-| `BASE_LR` | 3e-4 | Giảm từ 5e-4 để training ổn định hơn |
-| `WEIGHT_DECAY` | 5e-4 | Tăng từ 1e-4 để regularize mạnh hơn |
-| `WARMUP_EPOCHS` | 5 | Warmup đủ lâu |
-| `PATIENCE` | 10 | Tăng từ 8 để model có thêm cơ hội converge |
-| `EPOCHS` | 100 | Tăng từ 50 (với early stopping) |
-| `LABEL_SMOOTHING` | 0.1 | Giảm overconfidence |
-| **`USE_FOCAL_LOSS`** 🆕 | True | Tập trung vào hard examples |
-| **`FOCAL_GAMMA`** 🆕 | 2.0 | Standard value cho Focal Loss |
-| **`USE_CLASS_BALANCED_SAMPLING`** 🆕 | True | Đảm bảo minority classes được train đủ |
-| **`MALIGNANT_BOOST`** 🆕 | 1.5 | Tăng penalty cho malignant classes |
-| **`SCC_EXTRA_BOOST`** 🆕 | 2.0 | SCC có performance thấp nhất |
+OOF RESULTS:
+- Overall Balanced Accuracy: {oof_metrics['overall']['balanced_accuracy']:.4f}
 
-**Augmentation đặc biệt cho dermatology:**
+Per-class Performance:
+"""
+    
+    class_aucs = [(name, metrics['roc_auc'], metrics['is_malignant']) 
+                  for name, metrics in oof_metrics['per_class'].items() 
+                  if metrics['roc_auc'] is not None]
+    class_aucs.sort(key=lambda x: x[1], reverse=True)
+    
+    for class_name, auc_val, is_malignant in class_aucs:
+        marker = "⚠️ MALIGNANT" if is_malignant else ""
+        metrics = oof_metrics['per_class'][class_name]
+        summary_report += f"  {class_name}: AUC={auc_val:.4f}, F1={metrics['f1_score']:.4f}, Support={metrics['support']} {marker}\n"
+    
+    if test_submission is not None:
+        summary_report += f"""
+TEST SET PREDICTIONS:
+- Total Samples: {test_results['total_samples']}
+"""
+    
+    summary_report += f"""
+{'='*60}
+"""
+    
+    report_path = os.path.join(save_dir, 'experiment_summary.txt')
+    with open(report_path, 'w') as f:
+        f.write(summary_report)
+    print(f"✓ Saved experiment summary to {report_path}")
+    
+    print(summary_report)
 
-- `RandomResizedCrop` với scale (0.7, 1.0): Rộng hơn để tăng diversity
-- `Transpose`: Thêm rotation variety
-- `ShiftScaleRotate` với rotate_limit=90: Mạnh hơn
-- `MotionBlur`: Simulate camera shake
-- `OpticalDistortion/GridDistortion`: Simulate lens effects
-- `CoarseDropout` mạnh hơn: max_holes=8, nhiều kích thước
-- `CLAHE`: Tăng contrast local, giúp nhìn rõ cấu trúc da
-- `HueSaturationValue`: Xử lý skin tone variation
-- TTA (flip horizontal/vertical): Tăng ~1-2% accuracy
 
-**🆕 Output Files được tạo ra (cập nhật):**
+# Lưu toàn bộ kết quả
+save_experiment_results(
+    cfg=cfg,
+    results=results,
+    all_histories=all_histories,
+    oof_df=oof_df,
+    test_submission=test_submission,
+    save_dir=cfg.OUTPUT_DIR
+)
 
-| File | Mô tả |
-|------|-------|
-| `experiment_config.json` | Toàn bộ config bao gồm Focal Loss & Sampling params |
-| `training_results.json` | Kết quả training từng fold + summary |
-| `training_history.csv` | Loss, accuracy, LR theo từng epoch |
-| `oof_metrics.json` | Metrics chi tiết cho OOF predictions |
-| `oof_effnet_b0.csv` | OOF predictions với probabilities |
-| **`optimal_thresholds.json`** 🆕 | Optimal thresholds per class (F1 & Recall strategies) |
-| `effnet_b0_test_predictions.csv` | Predictions trên test set |
-| `effnet_b0_fold*_best.pth` | 5 model checkpoints |
-| `training_history.png` | Biểu đồ training curves |
-| `fold_comparison.png` | So sánh performance giữa folds |
-| `confusion_matrix.png` | Confusion matrix visualization |
-| `roc_curves.png` | ROC curves cho từng class |
-| `class_distribution.png` | Phân phối class predictions |
-| `experiment_summary.txt` | Summary report dạng text |
+print("\n" + "="*60)
+print("🎉 ALL RESULTS SAVED SUCCESSFULLY!")
+print("="*60)
 
-***
+# %%
+# Liệt kê tất cả output files
+print("="*60)
+print("OUTPUT FILES")
+print("="*60)
 
-## 7. Kỳ vọng cải thiện
+import glob
 
-| Metric | Baseline (v1) | Kỳ vọng (v2) |
-|--------|--------------|--------------|
-| **Balanced Accuracy** | 0.66 | **0.70-0.75** |
-| **SCC F1** | 0.37 | **0.45-0.55** |
-| **SCC AUC** | 0.79 | **0.85+** |
-| **DF/VASC Precision** | ~0.15 | **0.25-0.35** |
+output_files = glob.glob(os.path.join(cfg.OUTPUT_DIR, '*'))
+for f in sorted(output_files):
+    size = os.path.getsize(f)
+    if size > 1024*1024:
+        size_str = f"{size/1024/1024:.2f} MB"
+    elif size > 1024:
+        size_str = f"{size/1024:.2f} KB"
+    else:
+        size_str = f"{size} B"
+    print(f"  {os.path.basename(f):40} {size_str}")
 
-Các cải tiến tập trung vào:
-1. **Focal Loss** giúp model học tốt hơn từ hard examples
-2. **Class-balanced Sampling** đảm bảo minority classes được train đủ
-3. **Malignant Boost** tăng penalty cho sai sót trên ung thư ác tính
-4. **Threshold Optimization** giúp tối ưu predictions post-training
+print("="*60)
 
-***
+

@@ -1,0 +1,1 @@
+{"repos": [{"repoId": "timm/efficientnet_b0.ra_in1k", "repoType": "model", "commitHash": "1b5383e5f79cc0f7fc067e372f8f26a5fa73f26a", "filePaths": ["model.safetensors"]}]}

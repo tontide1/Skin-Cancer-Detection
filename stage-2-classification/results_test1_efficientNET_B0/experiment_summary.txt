@@ -1,0 +1,37 @@
+
+============================================================
+EXPERIMENT SUMMARY REPORT
+============================================================
+Timestamp: 20251125_184454
+Model: efficientnet_b0
+
+CONFIGURATION:
+- Image Size: 256
+- Batch Size: 64
+- Learning Rate: 0.0003
+- Weight Decay: 0.0005
+- Epochs: 100 (min: 15, patience: 10)
+- Dropout Rate: 0.4
+- Warmup Epochs: 5
+
+TRAINING RESULTS (5-Fold CV):
+- Mean Balanced Accuracy: 0.6592 ± 0.0221
+- Best Fold: 4 (0.6894)
+
+OOF RESULTS:
+- Overall Balanced Accuracy: 0.6594
+
+Per-class Performance:
+  BCC: AUC=0.9499, F1=0.7446, Support=3323 ⚠️ MALIGNANT
+  NV: AUC=0.9366, F1=0.7898, Support=12875 
+  VASC: AUC=0.9217, F1=0.2821, Support=253 
+  BKL: AUC=0.8899, F1=0.6015, Support=2624 
+  MEL: AUC=0.8831, F1=0.6101, Support=4522 ⚠️ MALIGNANT
+  DF: AUC=0.8473, F1=0.1954, Support=239 
+  AK: AUC=0.8378, F1=0.4071, Support=867 
+  SCC: AUC=0.7936, F1=0.3705, Support=628 ⚠️ MALIGNANT
+
+TEST SET PREDICTIONS:
+- Total Samples: 6191
+
+============================================================

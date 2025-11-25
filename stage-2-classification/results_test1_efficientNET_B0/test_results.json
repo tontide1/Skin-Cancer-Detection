@@ -1,0 +1,38 @@
+{
+    "timestamp": "20251125_184454",
+    "total_samples": 6191,
+    "prediction_distribution": {
+        "MEL": {
+            "count": 1241,
+            "percentage": 20.05
+        },
+        "NV": {
+            "count": 1853,
+            "percentage": 29.93
+        },
+        "BCC": {
+            "count": 1039,
+            "percentage": 16.78
+        },
+        "AK": {
+            "count": 508,
+            "percentage": 8.21
+        },
+        "BKL": {
+            "count": 679,
+            "percentage": 10.97
+        },
+        "DF": {
+            "count": 349,
+            "percentage": 5.64
+        },
+        "VASC": {
+            "count": 242,
+            "percentage": 3.91
+        },
+        "SCC": {
+            "count": 280,
+            "percentage": 4.52
+        }
+    }
+}

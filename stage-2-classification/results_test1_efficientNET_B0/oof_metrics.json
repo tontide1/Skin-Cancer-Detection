@@ -1,0 +1,73 @@
+{
+    "timestamp": "20251125_184454",
+    "overall": {
+        "balanced_accuracy": 0.6593719781110092,
+        "total_samples": 25331
+    },
+    "per_class": {
+        "MEL": {
+            "support": 4522,
+            "precision": 0.6166704314434154,
+            "recall": 0.6037151702786377,
+            "f1_score": 0.6101240362051625,
+            "roc_auc": 0.8831098358442148,
+            "is_malignant": true
+        },
+        "NV": {
+            "support": 12875,
+            "precision": 0.9296455989062993,
+            "recall": 0.6866019417475728,
+            "f1_score": 0.7898498927805575,
+            "roc_auc": 0.9365540060235329,
+            "is_malignant": false
+        },
+        "BCC": {
+            "support": 3323,
+            "precision": 0.7477996965098634,
+            "recall": 0.7414986458019862,
+            "f1_score": 0.7446358416440012,
+            "roc_auc": 0.9498620409747862,
+            "is_malignant": true
+        },
+        "AK": {
+            "support": 867,
+            "precision": 0.3316400580551524,
+            "recall": 0.5271049596309112,
+            "f1_score": 0.40712694877505573,
+            "roc_auc": 0.8378254929871769,
+            "is_malignant": false
+        },
+        "BKL": {
+            "support": 2624,
+            "precision": 0.5837217640731445,
+            "recall": 0.6204268292682927,
+            "f1_score": 0.6015148716053943,
+            "roc_auc": 0.8898986035787825,
+            "is_malignant": false
+        },
+        "DF": {
+            "support": 239,
+            "precision": 0.11236660389202763,
+            "recall": 0.7489539748953975,
+            "f1_score": 0.19541484716157206,
+            "roc_auc": 0.8472818354814118,
+            "is_malignant": false
+        },
+        "VASC": {
+            "support": 253,
+            "precision": 0.16945107398568018,
+            "recall": 0.841897233201581,
+            "f1_score": 0.2821192052980132,
+            "roc_auc": 0.9217150789930674,
+            "is_malignant": false
+        },
+        "SCC": {
+            "support": 628,
+            "precision": 0.29270544783010155,
+            "recall": 0.5047770700636943,
+            "f1_score": 0.3705435417884278,
+            "roc_auc": 0.79358859686193,
+            "is_malignant": true
+        }
+    }
+}

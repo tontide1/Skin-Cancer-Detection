@@ -1,0 +1,34 @@
+{
+    "experiment_timestamp": "20251125_184454",
+    "model_name": "efficientnet_b0",
+    "n_classes": 8,
+    "img_size": 256,
+    "n_folds": 5,
+    "batch_size": 64,
+    "epochs": 100,
+    "min_epochs": 15,
+    "patience": 10,
+    "base_lr": 0.0003,
+    "min_lr": 1e-06,
+    "weight_decay": 0.0005,
+    "warmup_epochs": 5,
+    "drop_rate": 0.4,
+    "pretrained": true,
+    "class_names": [
+        "MEL",
+        "NV",
+        "BCC",
+        "AK",
+        "BKL",
+        "DF",
+        "VASC",
+        "SCC"
+    ],
+    "paths": {
+        "csv_path": "/kaggle/input/isic-2019-task-1/ISIC_2019_5folds_metadata.csv",
+        "img_root": "/kaggle/input/isic-2019-task-1/cropped_lesions/cropped_lesions",
+        "test_csv_path": "/kaggle/input/isic-2019-task-1/ISIC_2019_test_metadata.csv",
+        "test_img_root": "/kaggle/input/isic-2019-task-1/cropped_lesions_testset/cropped_lesions_testset",
+        "output_dir": "/kaggle/working"
+    }
+}
