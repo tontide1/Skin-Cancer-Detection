@@ -38,8 +38,8 @@ class Config:
     
     # Paths
     MODEL_PATH = Path("/home/tontide1/coding/deep_learning/Skin-Cancer-Detection/stage-1-segmentation/output/final_resnet34_unet/results/best_model.pth")
-    INPUT_DIR = Path("data/raw/ISIC_2019_Training_Input")
-    OUTPUT_DIR = Path("data/processed/cropped_lesions")
+    INPUT_DIR = Path("data/raw/ISIC_2019_Test_Input")
+    OUTPUT_DIR = Path("data/processed/cropped_lesions_testset")
     
     # Model Configuration (from isic-2018-segmentation.py)
     MODEL_CONFIG = {
