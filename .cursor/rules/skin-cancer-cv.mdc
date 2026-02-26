@@ -1,0 +1,77 @@
+---
+description: Rules for the Skin-Cancer-Detection project (ISIC 2018 Task 1 segmentation). Always apply when working in this repository.
+alwaysApply: true
+---
+
+# Skin Cancer Detection — Project Rules
+
+## Project Context
+- Task: Binary skin lesion **segmentation** (ISIC 2018 Task 1)
+- Dataset: ISIC2018_Task1_Input (images) + ISIC2018_Task1_GroundTruth (binary masks)
+- Current best: **Dice=0.9021, IoU=0.8368** (ResNet34-UNet-SCSE, epoch 41)
+- Goals: (1) Beat Dice > 0.90 with new architectures, (2) Build a web app
+
+## Tech Stack
+- Python 3.11, PyTorch 2.x, `segmentation-models-pytorch` (SMP), `albumentations`
+- Experiment tracking: W&B + local CSV/JSON fallback
+- Config: YAML with `_base_` inheritance + CLI dot-notation overrides
+- Package: `src/` (editable install via `pip install -e .`)
+
+## Critical Rules
+
+### Model Registry (MUST follow)
+All architectures go through `src/models/segmentation.py` `_REGISTRY` dict.
+Use `create_model(config)` everywhere. Never hardcode model classes.
+
+```python
+_REGISTRY = {
+    "resnet34_unet": _build_resnet34_unet,
+    # Add new architectures here only
+}
+```
+
+### Experiment Configs
+Every experiment needs its own `configs/experiments/<name>.yaml` that does `_base_: ../base.yaml`.
+Never edit `base.yaml` for experiment-specific settings.
+
+### Metrics (all 4 required)
+Always report: `test_dice@0.5`, `test_iou@0.5`, `test_dice@best_threshold`, `best_threshold`.
+
+### Reproducibility
+- Set `seed` in config (default: 42)
+- Call `set_seed(config.seed)` at script start
+- Save `model_config` in every checkpoint alongside `state_dict`
+
+### Losses & Augmentations
+- New losses → `src/losses/segmentation.py` only
+- Train augmentations → `src/data/transforms.py` only
+- Val/test: Resize + Normalize only (no augmentation)
+
+## Project Structure Quick Reference
+```
+src/
+  data/       → ISICDataset, transforms (Albumentations)
+  losses/     → FocalLoss, SoftDiceLoss, CombinedLoss
+  metrics/    → dice_coefficient, iou_score, find_best_threshold
+  models/     → _REGISTRY, create_model() factory
+  training/   → Trainer, EarlyStopping, ModelCheckpoint
+  utils/      → Config loader, W&B Logger, set_seed
+configs/
+  base.yaml              → master defaults
+  experiments/*.yaml     → per-experiment overrides
+scripts/
+  train.py / evaluate.py / predict.py / prepare_data.py
+```
+
+## Architecture Candidates (Priority Order)
+1. `efficientnet-b4` encoder (SMP, drop-in)
+2. `mit_b2` / `mit_b4` (Mix Transformer, SegFormer backbone)
+3. `DeepLabV3+` decoder + EfficientNet encoder
+4. SAM fine-tuned on ISIC
+5. Swin-UNet / TransUNet
+
+## Web App Target
+- Backend: FastAPI + model serving
+- Inference: < 1s per 256×256 image
+- Export path: ONNX or TorchScript
+- `scripts/predict.py --overlay` for visualization already implemented
