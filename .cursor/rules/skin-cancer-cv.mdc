@@ -1,8 +1,7 @@
 ---
 description: Rules for the Skin-Cancer-Detection project (ISIC 2018 Task 1 segmentation). Always apply when working in this repository.
-alwaysApply: true
+alwaysApply: false
 ---
-
 # Skin Cancer Detection — Project Rules
 
 ## Project Context
