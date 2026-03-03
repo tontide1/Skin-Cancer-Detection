@@ -10,13 +10,15 @@ Given a dermoscopy image, the model predicts a binary mask delineating the lesio
 - Test Dice: **0.9021** | Test IoU: **0.8368** (best epoch: 41)
 - Goal: Beat Dice > 0.90 with new architectures, then deploy as FastAPI web application
 
+**Registered models:** `"unet"`, `"deeplabv3"` (MobileNetV3-Large backbone, torchvision)
+
 ---
 
 ## Tech Stack
 
 | Component | Details |
 |---|---|
-| Language | Python 3.11 (Conda) |
+| Language | Python 3.11 (Conda env: `CV`) |
 | DL Framework | PyTorch 2.x + AMP (`torch.amp`) |
 | Segmentation | `segmentation-models-pytorch >= 0.3` (SMP) |
 | Augmentation | `albumentations >= 1.3` |
@@ -32,9 +34,10 @@ Given a dermoscopy image, the model predicts a binary mask delineating the lesio
 ```
 Skin-Cancer-Detection/
 ├── configs/
-│   ├── base.yaml                    ← Master defaults for ALL experiments
+│   ├── base.yaml                          ← Master defaults for ALL experiments
 │   └── experiments/
-│       └── resnet34_unet_v1.yaml    ← Overrides only (inherits base.yaml via _base_)
+│       ├── resnet34_unet_v1.yaml          ← U-Net + ResNet34 baseline
+│       └── mobilenetv3_deeplabv3_v1.yaml  ← DeepLabV3 + MobileNetV3-Large
 ├── data/
 │   ├── ISIC2018_Task1-2_Training_Input/       ← 2594 raw images
 │   ├── ISIC2018_Task1_Training_GroundTruth/   ← 2594 raw masks
@@ -50,13 +53,18 @@ Skin-Cancer-Detection/
 │   ├── train.py                     ← Main training entry point
 │   ├── evaluate.py                  ← Test evaluation with TTA + threshold search
 │   └── predict.py                   ← Inference + overlay visualization
+├── tests/
+│   └── models/
+│       ├── test_deeplabv3_factory.py          ← Unit tests (monkeypatched torchvision)
+│       ├── test_deeplabv3_checkpoint_compat.py← Aux-key compat tests
+│       └── test_deeplabv3_integration.py      ← Smoke tests (real torchvision)
 └── src/                             ← Installable Python package
     ├── data/                        ← ISICDataset, get_transforms  ⚠ MISSING — must create
     ├── losses/                      ← FocalLoss, SoftDiceLoss, CombinedLoss
     ├── metrics/                     ← dice_coefficient, iou_score, find_best_threshold
     ├── models/                      ← Registry-based model factory (create_model)
     ├── training/                    ← Trainer, EarlyStopping, ModelCheckpoint
-    └── utils/                       ← Config loader (Config, load_config), Logger, set_seed
+    └── utils/                       ← Config, load_config, Logger, set_seed, checkpoint
 ```
 
 > **BLOCKING GAP:** `src/data/dataset.py` (`ISICDataset`) and `src/data/transforms.py`
@@ -68,23 +76,22 @@ Skin-Cancer-Detection/
 ## Commands Reference
 
 ```bash
-# Environment setup
-conda env create -f environment.yml && conda activate skin-cancer
+# Environment setup (Conda env name is "CV", NOT "skin-cancer")
+conda activate CV
 pip install -e .                          # editable install (required once)
 
 # Data preparation (run once)
-# Requires 6 official ISIC 2018 folders under data/ (see Project Structure above)
-python scripts/prepare_data.py
 python scripts/prepare_data.py --data-dir data/ --out-dir data/processed
 
 # Train
 python scripts/train.py --config configs/experiments/resnet34_unet_v1.yaml
+python scripts/train.py --config configs/experiments/mobilenetv3_deeplabv3_v1.yaml
 
 # Train with CLI overrides (no YAML editing needed)
 python scripts/train.py --config configs/experiments/resnet34_unet_v1.yaml \
     training.batch_size=32 \
     model.encoder_name=efficientnet-b4 \
-    output.dir=outputs/efficientnetb4_test
+    logging.use_wandb=false
 
 # Evaluate on test set (TTA + optimal threshold search)
 python scripts/evaluate.py \
@@ -105,9 +112,28 @@ python scripts/train.py --config configs/experiments/resnet34_unet_v1.yaml \
     logging.use_wandb=false
 ```
 
-> **No tests, no linter config, no CI** exist yet. When adding, use `pytest` for tests and
-> `ruff` for linting. Run a single test with:
-> `pytest tests/test_metrics.py::test_dice_coefficient -v`
+### Testing
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# Run a single test file
+pytest tests/models/test_deeplabv3_factory.py -v
+
+# Run a single test function
+pytest tests/models/test_deeplabv3_factory.py::test_deeplabv3_factory_uses_backbone_imagenet_weights -v
+
+# Run all model tests
+pytest tests/models/ -v
+
+# Skip integration tests (requires torchvision)
+pytest tests/ -v --ignore=tests/models/test_deeplabv3_integration.py
+```
+
+> No linter config or CI exist yet. When adding, use `ruff` for linting.
+> Integration tests in `test_deeplabv3_integration.py` auto-skip via `pytest.importorskip("torchvision")`
+> if torchvision is not installed.
 
 ---
 
@@ -115,13 +141,12 @@ python scripts/train.py --config configs/experiments/resnet34_unet_v1.yaml \
 
 ### 1. Model Registry (CRITICAL)
 All architectures **MUST** be registered in `src/models/segmentation.py` via `_REGISTRY`.
-The only currently registered key is `"unet"`. Never hardcode model classes elsewhere.
-Use `create_model(config)` as the sole entry point. `config.model.name` must match a key.
+Use `create_model(config)` as the sole entry point. `config.model.name` must match a registry key.
 
 ```python
 _REGISTRY = {
-    "unet":              _build_unet,
-    "efficientnet_unet": _build_efficientnet_unet,   # add new entries here
+    "unet":       _build_unet,
+    "deeplabv3":  _build_deeplabv3,   # add new entries here
 }
 ```
 
@@ -134,11 +159,15 @@ _base_: ../base.yaml
 model:
   name: unet
   encoder_name: efficientnet-b4
-output:
-  dir: outputs/efficientnetb4_unet_v1
 logging:
   experiment_name: efficientnetb4_unet_v1
+# output.dir NOT needed — train.py builds: outputs/<experiment_name>/
 ```
+
+> **IMPORTANT:** Do NOT set `output.dir` in experiment YAMLs. `train.py:135` constructs the
+> output path as `Path(config.output.dir) / config.logging.experiment_name`. Setting `output.dir`
+> to a sub-path (e.g. `outputs/my_exp`) and also setting `experiment_name: my_exp` causes
+> double-nesting: `outputs/my_exp/my_exp/`. Let `output.dir` inherit `outputs` from `base.yaml`.
 
 ### 3. Metric Reporting (mandatory 4-tuple)
 All evaluation results **MUST** report all four metrics — no exceptions:
@@ -179,7 +208,6 @@ Import order: stdlib → third-party → project-local (PEP 8). No `isort` enfor
 - Required on all public function signatures
 - Use built-in generics: `list[str]`, `dict[str, Any]`, `tuple[float, float]`
 - **Do not** use `from typing import Dict/List/Tuple` — use lowercase builtins (Python 3.9+)
-- Existing violation in `src/utils/misc.py` (`from typing import Dict`) — fix when touching that file
 
 ### Naming Conventions
 | Kind | Style | Examples |
@@ -210,9 +238,12 @@ def dice_coefficient(pred: torch.Tensor, target: torch.Tensor, threshold: float 
 ### Error Handling
 - **Scripts (missing path):** `log.error(...) + sys.exit(1)` — hard exit
 - **Factory (unknown key):** `raise ValueError(f"... Available: {list(_REGISTRY.keys())}")`
+- **Builder constraints:** `raise ValueError` with clear message (e.g. unsupported `in_channels`)
+- **Builder warnings:** `logging.getLogger(__name__).warning(...)` for ignored-but-informational fields
 - **Optional deps (W&B):** `try/except ImportError` → `logger.warning()` + graceful fallback
 - **Data validation:** `assert` with message is acceptable outside hot paths
-- **Checkpoint loading:** `.get("model_state_dict", ckpt)` to handle both formats
+- **Checkpoint loading:** `.get("model_state_dict", ckpt)` to handle both formats; use
+  `load_state_dict_with_aux_compat()` from `src/utils/checkpoint.py` for DeepLabV3 checkpoints
 - **Multi-GPU:** `model.module if hasattr(model, "module") else model` before attribute access
 - No bare `except:`, no silent swallowing of errors in hot paths
 
@@ -233,9 +264,13 @@ model_ref = model.module if hasattr(model, "module") else model
 
 1. Add `_build_<name>(cfg) -> nn.Module` in `src/models/segmentation.py`
 2. Register: `_REGISTRY["<name>"] = _build_<name>`
-3. Create `configs/experiments/<name>_v1.yaml` (set `_base_: ../base.yaml`, `model.name: <name>`)
-4. Train: `python scripts/train.py --config configs/experiments/<name>_v1.yaml`
-5. Evaluate: `python scripts/evaluate.py --checkpoint outputs/<name>_v1/best_model.pth --config ...`
+3. If using torchvision (not SMP): wrap with a dict-unwrapping `nn.Module` (see `DeepLabV3Wrapper`)
+4. Validate unsupported config fields at build time (`in_channels`, etc.) — raise `ValueError`
+5. Warn (not raise) for informational-only fields that are ignored by the builder
+6. Create `configs/experiments/<name>_v1.yaml` with `_base_: ../base.yaml` and `model.name: <name>`
+7. Add unit tests in `tests/models/` (mock heavy deps with `monkeypatch`; skip with `importorskip`)
+8. Train: `python scripts/train.py --config configs/experiments/<name>_v1.yaml`
+9. Evaluate: `python scripts/evaluate.py --checkpoint outputs/<name>_v1/best_model.pth --config ...`
 
 **Candidate architectures (ordered by expected impact):**
 - `efficientnet-b4` / `efficientnet-b6` encoder (SMP, drop-in swap)
@@ -243,6 +278,18 @@ model_ref = model.module if hasattr(model, "module") else model
 - `DeepLabV3+` decoder with ResNet50 / EfficientNet encoder
 - SAM (Segment Anything Model) fine-tuned on ISIC Task 1
 - Swin-UNet / TransUNet for Transformer-based segmentation
+
+---
+
+## DeepLabV3 — Known Constraints
+
+- Builder: `src/models/segmentation.py:_build_deeplabv3` uses `torchvision.models.segmentation.deeplabv3_mobilenet_v3_large`
+- `in_channels` **must** be 3 — torchvision hard-codes RGB input; builder raises `ValueError` otherwise
+- `encoder_name` is **informational only** — builder always uses MobileNetV3-Large; wrong value logs a warning
+- `aux_loss=False` is hard-coded — auxiliary head is never built; use `load_state_dict_with_aux_compat()`
+  in `src/utils/checkpoint.py` to load legacy checkpoints that had `aux_loss=True`
+- Minimum input spatial size for training: **≥ 128×128** (BatchNorm in ASPP crashes at smaller sizes)
+  — use the default `input_size: [256, 256]` from `base.yaml`
 
 ---
 

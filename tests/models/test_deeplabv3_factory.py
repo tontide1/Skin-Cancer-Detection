@@ -24,7 +24,9 @@ class _FakeDeepLab(torch.nn.Module):
         return {"out": out}
 
 
-def _install_fake_torchvision(monkeypatch: pytest.MonkeyPatch, calls: list[dict]) -> type:
+def _install_fake_torchvision(
+    monkeypatch: pytest.MonkeyPatch, calls: list[dict]
+) -> type:
     fake_torchvision = types.ModuleType("torchvision")
     fake_models = types.ModuleType("torchvision.models")
     fake_segmentation = types.ModuleType("torchvision.models.segmentation")
@@ -57,7 +59,9 @@ def _install_fake_torchvision(monkeypatch: pytest.MonkeyPatch, calls: list[dict]
 
     monkeypatch.setitem(sys.modules, "torchvision", fake_torchvision)
     monkeypatch.setitem(sys.modules, "torchvision.models", fake_models)
-    monkeypatch.setitem(sys.modules, "torchvision.models.segmentation", fake_segmentation)
+    monkeypatch.setitem(
+        sys.modules, "torchvision.models.segmentation", fake_segmentation
+    )
     return _FakeMobileNetWeights
 
 
@@ -66,7 +70,9 @@ def _make_config(encoder_weights: str | None) -> Config:
         {
             "model": {
                 "name": "deeplabv3",
+                "encoder_name": "mobilenet_v3_large",
                 "encoder_weights": encoder_weights,
+                "in_channels": 3,
                 "classes": 1,
             }
         }

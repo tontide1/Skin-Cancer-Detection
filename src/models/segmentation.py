@@ -5,13 +5,17 @@ Thêm model mới: implement build_<name>() rồi register vào create_model().
 
 from __future__ import annotations
 
+import logging
 import torch
 import torch.nn as nn
+
+_log = logging.getLogger(__name__)
 
 
 # =============================================================================
 # Wrappers
 # =============================================================================
+
 
 class DeepLabV3Wrapper(nn.Module):
     """
@@ -32,6 +36,7 @@ class DeepLabV3Wrapper(nn.Module):
 # =============================================================================
 # Builders
 # =============================================================================
+
 
 def _build_unet(config) -> nn.Module:
     """U-Net với SMP encoder backbone."""
@@ -56,11 +61,36 @@ def _build_deeplabv3(config) -> nn.Module:
         encoder_weights: "imagenet" → backbone ImageNet pretrained
                          null      → train from scratch
         classes:         Số output classes (default 1 cho binary segmentation)
+
+    Constraints:
+        - in_channels phải là 3 (torchvision hard-codes RGB input)
+        - encoder_name chỉ có giá trị informational; builder luôn dùng
+          deeplabv3_mobilenet_v3_large bất kể giá trị được set
     """
     from torchvision.models import MobileNet_V3_Large_Weights
     from torchvision.models.segmentation import deeplabv3_mobilenet_v3_large
 
     m = config.model
+
+    # Guard: torchvision không expose in_channels cho deeplabv3_mobilenet_v3_large
+    if m.in_channels != 3:
+        raise ValueError(
+            f"DeepLabV3 (torchvision) chỉ hỗ trợ in_channels=3 (RGB). "
+            f"Nhận được: in_channels={m.in_channels}. "
+            "Dùng SMP-based model nếu cần in_channels khác."
+        )
+
+    # Warn: encoder_name bị ignore vì builder này luôn dùng mobilenet_v3_large
+    _EXPECTED_ENCODER = "mobilenet_v3_large"
+    actual_encoder = getattr(m, "encoder_name", _EXPECTED_ENCODER)
+    if actual_encoder != _EXPECTED_ENCODER:
+        _log.warning(
+            "_build_deeplabv3 chỉ build deeplabv3_mobilenet_v3_large. "
+            "encoder_name=%r bị ignore (expected %r). "
+            "Thêm builder mới nếu cần backbone khác.",
+            actual_encoder,
+            _EXPECTED_ENCODER,
+        )
 
     # Official semantics:
     # - "imagenet": chỉ pretrained backbone
@@ -119,8 +149,5 @@ def create_model(config) -> nn.Module:
     name = config.model.name
     if name not in _REGISTRY:
         available = list(_REGISTRY.keys())
-        raise ValueError(
-            f"Model '{name}' chưa được register. "
-            f"Available: {available}"
-        )
+        raise ValueError(f"Model '{name}' chưa được register. Available: {available}")
     return _REGISTRY[name](config)
