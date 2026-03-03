@@ -39,7 +39,7 @@ if str(_REPO_ROOT) not in sys.path:
 from src.data.transforms import get_transforms
 from src.models.segmentation import create_model
 from src.utils.config import load_config, override_config
-from src.utils.misc import denormalize, get_device, set_seed
+from src.utils.misc import get_device, set_seed
 
 logging.basicConfig(
     level=logging.INFO,
@@ -102,6 +102,13 @@ def save_overlay(
     import matplotlib.pyplot as plt
 
     orig = np.array(Image.open(image_path).convert("RGB"))
+    # Prediction mask được tạo ở input_size của model; resize về ảnh gốc để tránh shape mismatch.
+    if mask.shape != orig.shape[:2]:
+        orig_h, orig_w = orig.shape[:2]
+        mask = np.array(
+            Image.fromarray(mask).resize((orig_w, orig_h), resample=Image.Resampling.NEAREST)
+        )
+
     mask_rgb = np.zeros_like(orig)
     mask_rgb[:, :, 0] = mask  # red channel
 

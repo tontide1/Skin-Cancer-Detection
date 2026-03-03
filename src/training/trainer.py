@@ -267,6 +267,7 @@ class Trainer:
                 self.model,
                 epoch,
                 extra={"val_iou": val_metrics["val_iou"]},
+                model_config=self.config.model.to_dict(),
             )
             if is_best:
                 best_metrics = epoch_metrics.copy()

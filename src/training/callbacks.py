@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 import torch
 
@@ -100,6 +101,7 @@ class ModelCheckpoint:
         model: torch.nn.Module,
         epoch: int,
         extra: dict | None = None,
+        model_config: dict[str, Any] | None = None,
     ) -> bool:
         """
         Kiểm tra và lưu model nếu tốt hơn.
@@ -124,6 +126,8 @@ class ModelCheckpoint:
                 ),
                 self.monitor: value,
             }
+            if model_config is not None:
+                payload["model_config"] = model_config
             if extra:
                 payload.update(extra)
 

@@ -5,7 +5,28 @@ Thêm model mới: implement build_<name>() rồi register vào create_model().
 
 from __future__ import annotations
 
+import torch
 import torch.nn as nn
+
+
+# =============================================================================
+# Wrappers
+# =============================================================================
+
+class DeepLabV3Wrapper(nn.Module):
+    """
+    Wrap torchvision DeepLabV3 output dict → raw logits tensor.
+
+    torchvision trả về OrderedDict({'out': tensor, 'aux': tensor}),
+    nhưng Trainer/losses/metrics expect tensor (B, C, H, W) trực tiếp.
+    """
+
+    def __init__(self, model: nn.Module):
+        super().__init__()
+        self.model = model
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.model(x)["out"]
 
 
 # =============================================================================
@@ -27,13 +48,49 @@ def _build_unet(config) -> nn.Module:
     )
 
 
+def _build_deeplabv3(config) -> nn.Module:
+    """
+    DeepLabV3 với MobileNetV3-Large backbone (torchvision).
+
+    Config mapping:
+        encoder_weights: "imagenet" → weights="DEFAULT" (COCO pretrained)
+                         null      → weights=None
+        classes:         Số output classes (default 1 cho binary segmentation)
+    """
+    from torchvision.models.segmentation import deeplabv3_mobilenet_v3_large
+
+    m = config.model
+
+    # Map encoder_weights → torchvision weights param
+    weights = "DEFAULT" if m.encoder_weights == "imagenet" else None
+
+    model = deeplabv3_mobilenet_v3_large(weights=weights)
+
+    # Replace classifier head nếu classes khác default (21 = VOC/COCO)
+    num_classes = m.classes
+    if num_classes != 21:
+        # Main classifier
+        in_channels_classifier = model.classifier[-1].in_channels
+        model.classifier[-1] = nn.Conv2d(
+            in_channels_classifier, num_classes, kernel_size=1,
+        )
+        # Auxiliary classifier (nếu có)
+        if model.aux_classifier is not None:
+            in_channels_aux = model.aux_classifier[-1].in_channels
+            model.aux_classifier[-1] = nn.Conv2d(
+                in_channels_aux, num_classes, kernel_size=1,
+            )
+
+    return DeepLabV3Wrapper(model)
+
+
 # =============================================================================
 # Factory
 # =============================================================================
 
 _REGISTRY = {
     "unet": _build_unet,
-    # "sam2": _build_sam2,   ← thêm model mới ở đây
+    "deeplabv3": _build_deeplabv3,
 }
 
 

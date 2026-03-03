@@ -9,6 +9,7 @@
 
 ## Table of Contents
 
+0. [Current Source Snapshot (Mar 2026)](#current-source-snapshot-mar-2026)
 1. [Quick Reference Table](#1-quick-reference-table)
 2. [Invocation Syntax](#2-invocation-syntax)
 3. [Context Template — Truyền context đúng cách](#3-context-template)
@@ -17,6 +18,14 @@
 6. [Skills không phù hợp — Tránh lãng phí thời gian](#6-skills-không-phù-hợp)
 7. [Checklist theo giai đoạn phát triển](#7-checklist-theo-giai-đoạn-phát-triển)
 8. [Tips & Anti-Patterns](#8-tips--anti-patterns)
+
+---
+
+## Current Source Snapshot (Mar 2026)
+
+- `scripts/predict.py --overlay` đã xử lý mismatch shape: predicted mask được resize về kích thước ảnh gốc bằng `nearest-neighbor` trước khi blend.
+- `src/training/callbacks.py::ModelCheckpoint.step()` đã lưu `model_config` trong checkpoint payload.
+- `src/training/trainer.py` hiện truyền `self.config.model.to_dict()` vào key `model_config` khi lưu best checkpoint.
 
 ---
 
@@ -722,6 +731,7 @@ Use @architecture to design the FastAPI web application for skin lesion segmenta
 
 Context:
 - scripts/predict.py already implements single-image inference logic (reuse it)
+- overlay path in predict already resizes predicted mask to original image size safely
 - Target: < 1s per image on CPU at 256×256
 - Output: 3-panel PNG (original | mask | overlay) OR raw binary mask
 - AGENTS.md: "Planned backend: FastAPI + model loading at startup"

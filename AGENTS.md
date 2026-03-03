@@ -93,6 +93,7 @@ python scripts/evaluate.py \
 
 # Predict with 3-panel overlay (original | mask | overlay)
 python scripts/predict.py \
+    --config configs/experiments/resnet34_unet_v1.yaml \
     --input data/processed/test/images/ISIC_0024306.jpg \
     --checkpoint outputs/resnet34_unet_v1/best_model.pth \
     --overlay --tta
@@ -149,6 +150,7 @@ All evaluation results **MUST** report all four metrics — no exceptions:
 ### 4. Reproducibility
 - `seed: 42` in every YAML; call `set_seed(config.seed)` at start of every script
 - Save `model_config` alongside `state_dict` in every checkpoint
+  - Current implementation stores `config.model.to_dict()` under checkpoint key `model_config`
 
 ### 5. Loss Function
 Default: `CombinedLoss(0.5 × FocalLoss(γ=2) + 0.5 × SoftDiceLoss)`.
@@ -247,6 +249,7 @@ model_ref = model.module if hasattr(model, "module") else model
 ## Web Product Target
 
 - `scripts/predict.py --overlay` produces a 3-panel PNG (original | mask | overlay)
+- Overlay path auto-resizes predicted mask to original image resolution before blending
 - Target inference: **< 1s per image** at 256×256 on CPU
 - Planned backend: **FastAPI** + model loading at startup
 - ONNX / TorchScript export for lighter cloud deployment
