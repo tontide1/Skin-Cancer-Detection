@@ -103,7 +103,11 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="Path to experiment YAML config file.\nExample: configs/experiments/resnet34_unet_v1.yaml",
     )
-    # Catch-all for dot-notation overrides: key.subkey=value
+    parser.add_argument(
+        "--resume", "-r",
+        default=None,
+        help="Path to last_checkpoint.pth to resume training from.",
+    )
     parser.add_argument(
         "overrides",
         nargs="*",
@@ -153,16 +157,27 @@ def main() -> None:
     # 8. Trainer
     trainer = Trainer(model, config, device, logger)
 
+    # 8b. Resume from checkpoint if requested
+    start_epoch = 0
+    if args.resume:
+        ckpt = trainer.load_checkpoint(args.resume, resume=True)
+        start_epoch = ckpt.get("epoch", -1) + 1
+        log.info(f"Resuming from epoch {start_epoch + 1}")
+
     # 9. Fit
-    summary = trainer.fit(train_loader, val_loader, output_dir)
+    summary = trainer.fit(train_loader, val_loader, output_dir, start_epoch=start_epoch)
 
     # 10. Finish logging
     logger.finish()
 
-    log.info(
-        f"Done. Best val_dice={summary['best_metrics'].get('val_dice', 'N/A'):.4f} "
-        f"at epoch {summary['best_epoch']}"
-    )
+    best_dice = summary["best_metrics"].get("val_dice")
+    if best_dice is not None:
+        log.info(
+            f"Done. Best val_dice={best_dice:.4f} "
+            f"at epoch {summary['best_epoch'] + 1}"
+        )
+    else:
+        log.warning("Training finished without improvement.")
 
 
 if __name__ == "__main__":

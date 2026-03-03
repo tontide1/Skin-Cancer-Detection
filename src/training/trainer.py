@@ -63,7 +63,7 @@ class Trainer:
         self.scheduler = self._build_scheduler()
 
         # Mixed precision scaler (PyTorch 2.x API)
-        self.scaler = GradScaler("cuda", enabled=config.training.mixed_precision)
+        self.scaler = GradScaler(device.type, enabled=config.training.mixed_precision)
 
         # Grad clipping
         self.grad_clip = config.training.grad_clip
@@ -204,6 +204,7 @@ class Trainer:
         train_loader: DataLoader,
         val_loader: DataLoader,
         output_dir: Path | str,
+        start_epoch: int = 0,
     ) -> dict:
         """
         Main training loop.
@@ -212,6 +213,7 @@ class Trainer:
             train_loader: DataLoader for training set
             val_loader:   DataLoader for validation set
             output_dir:   Nơi lưu best_model.pth và results
+            start_epoch:  Epoch to resume from (0-indexed, default 0)
 
         Returns:
             Dict tóm tắt kết quả training
@@ -236,11 +238,29 @@ class Trainer:
 
         best_metrics: dict = {}
 
+        lr_cfg = self.config.lr_schedule
+        warmup_epochs = getattr(lr_cfg, "warmup_epochs", 0) or 0
+        warmup_start_lr = getattr(lr_cfg, "warmup_start_lr", 1e-6)
+        target_lr = self.config.training.lr
+
         print("=" * 70)
-        print("  TRAINING START")
+        if start_epoch > 0:
+            print(f"  TRAINING RESUMED from epoch {start_epoch + 1}")
+        else:
+            print("  TRAINING START")
+        if warmup_epochs > 0:
+            print(f"  Warmup: {warmup_epochs} epochs ({warmup_start_lr:.1e} → {target_lr:.1e})")
         print("=" * 70)
 
-        for epoch in range(self.config.training.max_epochs):
+        for epoch in range(start_epoch, self.config.training.max_epochs):
+            # --- Warmup LR (linear ramp before main scheduler) ---
+            if epoch < warmup_epochs:
+                warmup_lr = warmup_start_lr + (
+                    (target_lr - warmup_start_lr) * epoch / max(warmup_epochs, 1)
+                )
+                for pg in self.optimizer.param_groups:
+                    pg["lr"] = warmup_lr
+
             # --- Train ---
             train_metrics = self.train_one_epoch(train_loader)
             val_metrics   = self.validate(val_loader)
@@ -274,12 +294,16 @@ class Trainer:
                 best_metrics = epoch_metrics.copy()
                 print(f"  ✓ Best model saved ({monitor}={monitor_value:.4f})")
 
-            # --- LR Scheduler ---
-            sched = self.config.lr_schedule.scheduler.lower()
-            if sched == "reduce_on_plateau":
-                self.scheduler.step(val_metrics[monitor])
-            else:
-                self.scheduler.step()
+            # --- Save last checkpoint for resume ---
+            self._save_last_checkpoint(output_dir, epoch)
+
+            # --- LR Scheduler (skip during warmup) ---
+            if epoch >= warmup_epochs:
+                sched = self.config.lr_schedule.scheduler.lower()
+                if sched == "reduce_on_plateau":
+                    self.scheduler.step(val_metrics[monitor])
+                else:
+                    self.scheduler.step()
 
             # --- Early Stopping ---
             if early_stop.step(monitor_value):
@@ -299,7 +323,7 @@ class Trainer:
 
         # --- Save training summary ---
         summary = {
-            "best_epoch": checkpoint.best,
+            "best_epoch": checkpoint.best_epoch,
             "best_metrics": best_metrics,
             "total_epochs": epoch + 1,
         }
@@ -309,14 +333,52 @@ class Trainer:
         self.log.log_summary(best_metrics)
         return summary
 
+    def _save_last_checkpoint(self, output_dir: Path, epoch: int) -> None:
+        """Save full training state for resume (overwrites each epoch)."""
+        model_ref = self.model.module if hasattr(self.model, "module") else self.model
+        payload = {
+            "epoch": epoch,
+            "model_state_dict": model_ref.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
+            "scheduler_state_dict": self.scheduler.state_dict(),
+            "scaler_state_dict": self.scaler.state_dict(),
+        }
+        torch.save(payload, output_dir / "last_checkpoint.pth")
+
     # ------------------------------------------------------------------
     # Checkpoint I/O
     # ------------------------------------------------------------------
 
-    def load_checkpoint(self, path: Path | str) -> dict:
-        """Load model từ checkpoint file."""
+    def load_checkpoint(self, path: Path | str, resume: bool = False) -> dict:
+        """
+        Load model from checkpoint file.
+
+        Args:
+            path:   Path to checkpoint (.pth).
+            resume: If True, also restore optimizer, scheduler, and scaler state
+                    for continuing training.  If False, only model weights are loaded.
+
+        Returns:
+            The raw checkpoint dict (caller can inspect ``ckpt["epoch"]`` etc.).
+        """
         ckpt = torch.load(path, map_location=self.device, weights_only=False)
         state = ckpt.get("model_state_dict", ckpt)
         load_state_dict_with_aux_compat(self.model, state, context=str(path))
-        logger.info(f"Loaded checkpoint: {path}")
+
+        if resume:
+            if "optimizer_state_dict" in ckpt:
+                self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+            if "scheduler_state_dict" in ckpt:
+                self.scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+            if "scaler_state_dict" in ckpt:
+                self.scaler.load_state_dict(ckpt["scaler_state_dict"])
+            logger.info(
+                "Resumed full training state (optimizer + scheduler + scaler) "
+                "from %s at epoch %d",
+                path,
+                ckpt.get("epoch", -1) + 1,
+            )
+        else:
+            logger.info(f"Loaded model weights from: {path}")
+
         return ckpt

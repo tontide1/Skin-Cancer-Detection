@@ -37,6 +37,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from src.data.transforms import get_transforms
+from src.inference.tta import tta_predict
 from src.models.segmentation import create_model
 from src.utils.checkpoint import load_state_dict_with_aux_compat
 from src.utils.config import load_config, override_config
@@ -82,10 +83,7 @@ def predict_single(
     x = image_tensor.to(device)
 
     if use_tta:
-        probs  = torch.sigmoid(model(x))
-        probs += torch.sigmoid(model(torch.flip(x, dims=[3]))).flip(dims=[3])
-        probs += torch.sigmoid(model(torch.flip(x, dims=[2]))).flip(dims=[2])
-        probs /= 3.0
+        probs = tta_predict(model, x)
     else:
         probs = torch.sigmoid(model(x))
 

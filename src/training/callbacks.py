@@ -90,10 +90,11 @@ class ModelCheckpoint:
         mode: str = "max",
         monitor: str = "val_dice",
     ):
-        self.save_path = Path(save_path)
-        self.mode      = mode
-        self.monitor   = monitor
-        self.best      = None
+        self.save_path  = Path(save_path)
+        self.mode       = mode
+        self.monitor    = monitor
+        self.best       = None
+        self.best_epoch: int | None = None
 
     def step(
         self,
@@ -117,6 +118,7 @@ class ModelCheckpoint:
 
         if is_best:
             self.best = value
+            self.best_epoch = epoch
             payload = {
                 "epoch": epoch,
                 "model_state_dict": (

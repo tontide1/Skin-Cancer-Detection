@@ -134,7 +134,30 @@ def _set_nested(d: dict, key_path: str, value: Any) -> None:
     current[keys[-1]] = value
 
 
-def override_config(config: Config, overrides: list[str]) -> Config:
+def _validate_key_exists(d: dict, key_path: str) -> None:
+    """
+    Validate that a dot-notation key path exists in the config dict.
+
+    Raises:
+        ValueError: If the key path does not exist (likely a typo).
+    """
+    keys = key_path.split(".")
+    current = d
+    for i, key in enumerate(keys):
+        if not isinstance(current, dict) or key not in current:
+            traversed = ".".join(keys[: i + 1])
+            raise ValueError(
+                f"Config key '{key_path}' không tồn tại "
+                f"(failed at '{traversed}'). Kiểm tra lại tên key."
+            )
+        current = current[key]
+
+
+def override_config(
+    config: Config,
+    overrides: list[str],
+    strict: bool = True,
+) -> Config:
     """
     Override config từ CLI args dạng "key.subkey=value".
 
@@ -147,8 +170,10 @@ def override_config(config: Config, overrides: list[str]) -> Config:
         ]
 
     Args:
-        config: Config object đã load
+        config:    Config object đã load
         overrides: List các string "key=value"
+        strict:    If True (default), raise ValueError for unknown keys.
+                   Set to False to allow adding new keys.
 
     Returns:
         Config đã được override
@@ -164,7 +189,12 @@ def override_config(config: Config, overrides: list[str]) -> Config:
                 f"Override '{item}' không hợp lệ. Phải có dạng 'key.subkey=value'"
             )
         key_path, _, value_str = item.partition("=")
+        key_path = key_path.strip()
+
+        if strict:
+            _validate_key_exists(config_dict, key_path)
+
         value = _cast_value(value_str)
-        _set_nested(config_dict, key_path.strip(), value)
+        _set_nested(config_dict, key_path, value)
 
     return Config(config_dict)

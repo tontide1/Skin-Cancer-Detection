@@ -6,7 +6,7 @@
 # After creation, install the local src package:
 #   pip install -e .
 
-name: skin-cancer
+name: CV
 
 channels:
   - pytorch

@@ -45,6 +45,8 @@ lr_schedule:
   factor: 0.5
   patience: 5
   min_lr: 1.0e-7
+  warmup_epochs: 0                   # 0 = no warmup
+  warmup_start_lr: 1.0e-6            # LR at epoch 0 when warmup > 0
 
 # -----------------------------------------------------------------------------
 # Early Stopping

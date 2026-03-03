@@ -38,6 +38,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from src.data.dataset import ISICDataset
 from src.data.transforms import get_transforms
+from src.inference.tta import tta_predict
 from src.losses.segmentation import CombinedLoss
 from src.metrics.segmentation import dice_coefficient, find_best_threshold, iou_score
 from src.models.segmentation import create_model
@@ -51,21 +52,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# TTA helpers
-# ---------------------------------------------------------------------------
-
-def _tta_predict(model: torch.nn.Module, images: torch.Tensor) -> torch.Tensor:
-    """
-    Test-Time Augmentation: average predictions over original + hflip + vflip.
-    Inputs/outputs are raw logits.
-    """
-    preds = torch.sigmoid(model(images))
-    preds += torch.sigmoid(model(torch.flip(images, dims=[3])).flip(dims=[3]))  # h-flip
-    preds += torch.sigmoid(model(torch.flip(images, dims=[2])).flip(dims=[2]))  # v-flip
-    return preds / 3.0  # already in [0,1], skip sigmoid later
 
 
 # ---------------------------------------------------------------------------
@@ -93,7 +79,7 @@ def evaluate(
         masks  = masks.to(device)
 
         if use_tta:
-            probs  = _tta_predict(model, images)
+            probs  = tta_predict(model, images)
             logits = torch.logit(probs.clamp(1e-6, 1 - 1e-6))  # probs → logits for loss
         else:
             logits = model(images)
