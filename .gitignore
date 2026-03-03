@@ -3,9 +3,16 @@ stage-1-segmentation/data/
 stage-2-classification/data/
 *.zip
 *.pth
+data/ISIC2018_Task1_Test_GroundTruth
+data/ISIC2018_Task1_Training_GroundTruth
+data/ISIC2018_Task1_Validation_GroundTruth
+data/ISIC2018_Task1-2_Test_Input
+data/ISIC2018_Task1-2_Training_Input
+data/ISIC2018_Task1-2_Validation_Input
+data/processed
+
 
 # Project data & large model outputs
-data/
 outputs/**/*.pth
 outputs/**/*.pt
 

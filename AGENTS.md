@@ -59,17 +59,13 @@ Skin-Cancer-Detection/
 │       ├── test_deeplabv3_checkpoint_compat.py← Aux-key compat tests
 │       └── test_deeplabv3_integration.py      ← Smoke tests (real torchvision)
 └── src/                             ← Installable Python package
-    ├── data/                        ← ISICDataset, get_transforms  ⚠ MISSING — must create
+    ├── data/                        ← ISICDataset, get_transforms
     ├── losses/                      ← FocalLoss, SoftDiceLoss, CombinedLoss
     ├── metrics/                     ← dice_coefficient, iou_score, find_best_threshold
     ├── models/                      ← Registry-based model factory (create_model)
     ├── training/                    ← Trainer, EarlyStopping, ModelCheckpoint
     └── utils/                       ← Config, load_config, Logger, set_seed, checkpoint
 ```
-
-> **BLOCKING GAP:** `src/data/dataset.py` (`ISICDataset`) and `src/data/transforms.py`
-> (`get_transforms`) are imported by all scripts but **do not exist**. Create these before
-> attempting to run any script.
 
 ---
 
