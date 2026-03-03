@@ -1,6 +1,6 @@
 # =============================================================================
 # Experiment: mobilenetv3_deeplabv3_v1
-# DeepLabV3 + MobileNetV3-Large backbone (torchvision pretrained)
+# DeepLabV3 + MobileNetV3-Large (backbone ImageNet pretrained only)
 # So sánh với U-Net + ResNet34 baseline
 # =============================================================================
 
@@ -9,7 +9,8 @@ _base_: ../base.yaml
 model:
   name: deeplabv3
   encoder_name: mobilenet_v3_large # informational, dùng cho logging
-  encoder_weights: imagenet # "imagenet" → COCO pretrained weights
+  encoder_weights: imagenet # "imagenet" -> weights_backbone=IMAGENET1K_V1
+  # aux head disabled by design (aux_loss=False in builder)
 
 training:
   batch_size: 64 # MobileNetV3 nhẹ → có thể tăng batch

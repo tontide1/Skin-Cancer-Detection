@@ -19,6 +19,7 @@ from tqdm.auto import tqdm
 from src.losses import CombinedLoss
 from src.metrics import dice_coefficient, iou_score
 from src.training.callbacks import EarlyStopping, ModelCheckpoint
+from src.utils.checkpoint import load_state_dict_with_aux_compat
 from src.utils.logger import Logger
 from src.utils.misc import plot_training_curves
 
@@ -316,9 +317,6 @@ class Trainer:
         """Load model từ checkpoint file."""
         ckpt = torch.load(path, map_location=self.device, weights_only=False)
         state = ckpt.get("model_state_dict", ckpt)
-        if hasattr(self.model, "module"):
-            self.model.module.load_state_dict(state)
-        else:
-            self.model.load_state_dict(state)
+        load_state_dict_with_aux_compat(self.model, state, context=str(path))
         logger.info(f"Loaded checkpoint: {path}")
         return ckpt

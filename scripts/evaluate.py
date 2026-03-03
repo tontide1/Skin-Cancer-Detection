@@ -41,6 +41,7 @@ from src.data.transforms import get_transforms
 from src.losses.segmentation import CombinedLoss
 from src.metrics.segmentation import dice_coefficient, find_best_threshold, iou_score
 from src.models.segmentation import create_model
+from src.utils.checkpoint import load_state_dict_with_aux_compat
 from src.utils.config import load_config, override_config
 from src.utils.misc import get_device, set_seed
 
@@ -190,7 +191,7 @@ def main() -> None:
     model = create_model(config).to(device)
     ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
     state = ckpt.get("model_state_dict", ckpt)
-    model.load_state_dict(state)
+    load_state_dict_with_aux_compat(model, state, context=str(args.checkpoint))
     log.info(f"Loaded checkpoint: {args.checkpoint}")
 
     # Loss

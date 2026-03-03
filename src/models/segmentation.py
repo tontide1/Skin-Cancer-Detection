@@ -53,33 +53,38 @@ def _build_deeplabv3(config) -> nn.Module:
     DeepLabV3 với MobileNetV3-Large backbone (torchvision).
 
     Config mapping:
-        encoder_weights: "imagenet" → weights="DEFAULT" (COCO pretrained)
-                         null      → weights=None
+        encoder_weights: "imagenet" → backbone ImageNet pretrained
+                         null      → train from scratch
         classes:         Số output classes (default 1 cho binary segmentation)
     """
+    from torchvision.models import MobileNet_V3_Large_Weights
     from torchvision.models.segmentation import deeplabv3_mobilenet_v3_large
 
     m = config.model
 
-    # Map encoder_weights → torchvision weights param
-    weights = "DEFAULT" if m.encoder_weights == "imagenet" else None
+    # Official semantics:
+    # - "imagenet": chỉ pretrained backbone
+    # - None:       train from scratch
+    encoder_weights = m.encoder_weights
+    if isinstance(encoder_weights, str):
+        encoder_weights = encoder_weights.lower()
 
-    model = deeplabv3_mobilenet_v3_large(weights=weights)
-
-    # Replace classifier head nếu classes khác default (21 = VOC/COCO)
-    num_classes = m.classes
-    if num_classes != 21:
-        # Main classifier
-        in_channels_classifier = model.classifier[-1].in_channels
-        model.classifier[-1] = nn.Conv2d(
-            in_channels_classifier, num_classes, kernel_size=1,
+    if encoder_weights == "imagenet":
+        weights_backbone = MobileNet_V3_Large_Weights.IMAGENET1K_V1
+    elif encoder_weights is None:
+        weights_backbone = None
+    else:
+        raise ValueError(
+            "DeepLabV3 chỉ hỗ trợ model.encoder_weights='imagenet' hoặc null. "
+            f"Nhận được: {m.encoder_weights!r}"
         )
-        # Auxiliary classifier (nếu có)
-        if model.aux_classifier is not None:
-            in_channels_aux = model.aux_classifier[-1].in_channels
-            model.aux_classifier[-1] = nn.Conv2d(
-                in_channels_aux, num_classes, kernel_size=1,
-            )
+
+    model = deeplabv3_mobilenet_v3_large(
+        weights=None,
+        weights_backbone=weights_backbone,
+        num_classes=m.classes,
+        aux_loss=False,
+    )
 
     return DeepLabV3Wrapper(model)
 
