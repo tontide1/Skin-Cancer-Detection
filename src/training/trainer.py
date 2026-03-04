@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.amp import GradScaler
 from torch.utils.data import DataLoader
@@ -24,6 +25,24 @@ from src.utils.logger import Logger
 from src.utils.misc import plot_training_curves
 
 logger = logging.getLogger(__name__)
+
+
+def _compute_warmup_lr(
+    epoch: int,
+    warmup_epochs: int,
+    warmup_start_lr: float,
+    target_lr: float,
+) -> float:
+    """
+    Compute linear warmup learning rate.
+
+    Warmup progress uses (epoch + 1) / warmup_epochs so that the final warmup
+    epoch reaches exactly target_lr.
+    """
+    if warmup_epochs <= 0:
+        return target_lr
+    progress = min((epoch + 1) / warmup_epochs, 1.0)
+    return warmup_start_lr + (target_lr - warmup_start_lr) * progress
 
 
 class Trainer:
@@ -47,11 +66,16 @@ class Trainer:
         config: Any,
         device: torch.device,
         log: Logger,
+        is_distributed: bool = False,
+        is_main_process: bool = True,
     ):
         self.model  = model
         self.config = config
         self.device = device
         self.log    = log
+        self.is_distributed = is_distributed
+        self.is_main_process = is_main_process
+        self._resume_state: dict[str, Any] = {}
 
         # Loss
         self.criterion = CombinedLoss(config)
@@ -102,12 +126,38 @@ class Trainer:
                 min_lr=cfg.min_lr,
             )
         if name == "cosine":
+            warmup_epochs = int(getattr(cfg, "warmup_epochs", 0) or 0)
+            cosine_epochs = max(1, int(self.config.training.max_epochs) - warmup_epochs)
             return torch.optim.lr_scheduler.CosineAnnealingLR(
                 self.optimizer,
-                T_max=self.config.training.max_epochs,
+                T_max=cosine_epochs,
                 eta_min=cfg.min_lr,
             )
         raise ValueError(f"Scheduler '{name}' chưa được hỗ trợ.")
+
+    def _sync_epoch_totals(
+        self,
+        total_loss: float,
+        total_dice: float,
+        total_iou: float,
+        n_samples: int,
+    ) -> tuple[float, float, float, int]:
+        """
+        Synchronize accumulated sums across DDP processes.
+        """
+        stats = torch.tensor(
+            [total_loss, total_dice, total_iou, float(n_samples)],
+            device=self.device,
+            dtype=torch.float64,
+        )
+        if self.is_distributed:
+            dist.all_reduce(stats, op=dist.ReduceOp.SUM)
+        return (
+            float(stats[0].item()),
+            float(stats[1].item()),
+            float(stats[2].item()),
+            int(stats[3].item()),
+        )
 
     # ------------------------------------------------------------------
     # Core training
@@ -117,13 +167,14 @@ class Trainer:
         """Train 1 epoch. Returns dict metrics."""
         self.model.train()
         total_loss = total_dice = total_iou = 0.0
+        n_samples = 0
 
-        pbar = tqdm(loader, desc="Train", leave=False)
+        pbar = tqdm(loader, desc="Train", leave=False, disable=not self.is_main_process)
         for images, masks in pbar:
             images = images.to(self.device)
             masks  = masks.to(self.device)
 
-            self.optimizer.zero_grad()
+            self.optimizer.zero_grad(set_to_none=True)
 
             with torch.amp.autocast(
                 device_type=self.device.type,
@@ -150,10 +201,16 @@ class Trainer:
             total_loss += loss.item() * n
             total_dice += d * n
             total_iou  += i * n
+            n_samples += n
 
-            pbar.set_postfix(loss=f"{loss.item():.4f}", dice=f"{d:.4f}")
+            if self.is_main_process:
+                pbar.set_postfix(loss=f"{loss.item():.4f}", dice=f"{d:.4f}")
 
-        n_samples = len(loader.dataset)
+        total_loss, total_dice, total_iou, n_samples = self._sync_epoch_totals(
+            total_loss, total_dice, total_iou, n_samples
+        )
+        if n_samples == 0:
+            raise RuntimeError("Train loader không có sample nào.")
         return {
             "train_loss": total_loss / n_samples,
             "train_dice": total_dice / n_samples,
@@ -165,8 +222,9 @@ class Trainer:
         """Validate model. Returns dict metrics."""
         self.model.eval()
         total_loss = total_dice = total_iou = 0.0
+        n_samples = 0
 
-        pbar = tqdm(loader, desc="Val  ", leave=False)
+        pbar = tqdm(loader, desc="Val  ", leave=False, disable=not self.is_main_process)
         for images, masks in pbar:
             images = images.to(self.device)
             masks  = masks.to(self.device)
@@ -185,10 +243,16 @@ class Trainer:
             total_loss += loss.item() * n
             total_dice += d * n
             total_iou  += i * n
+            n_samples += n
 
-            pbar.set_postfix(dice=f"{d:.4f}")
+            if self.is_main_process:
+                pbar.set_postfix(dice=f"{d:.4f}")
 
-        n_samples = len(loader.dataset)
+        total_loss, total_dice, total_iou, n_samples = self._sync_epoch_totals(
+            total_loss, total_dice, total_iou, n_samples
+        )
+        if n_samples == 0:
+            raise RuntimeError("Validation loader không có sample nào.")
         return {
             "val_loss": total_loss / n_samples,
             "val_dice": total_dice / n_samples,
@@ -205,6 +269,7 @@ class Trainer:
         val_loader: DataLoader,
         output_dir: Path | str,
         start_epoch: int = 0,
+        train_sampler: Any | None = None,
     ) -> dict:
         """
         Main training loop.
@@ -214,6 +279,7 @@ class Trainer:
             val_loader:   DataLoader for validation set
             output_dir:   Nơi lưu best_model.pth và results
             start_epoch:  Epoch to resume from (0-indexed, default 0)
+            train_sampler: Sampler (e.g., DistributedSampler) để gọi set_epoch()
 
         Returns:
             Dict tóm tắt kết quả training
@@ -236,27 +302,56 @@ class Trainer:
             monitor=monitor,
         )
 
-        best_metrics: dict = {}
+        best_metrics: dict[str, Any] = {}
+        if start_epoch > 0:
+            prev_best, prev_best_epoch, prev_best_metrics = self._load_previous_best_state(
+                output_dir, monitor
+            )
+            checkpoint.best = prev_best
+            checkpoint.best_epoch = prev_best_epoch
+            best_metrics = prev_best_metrics
+            if self.is_main_process and prev_best is not None:
+                epoch_text = (
+                    f"epoch {prev_best_epoch + 1}"
+                    if prev_best_epoch is not None
+                    else "epoch unknown"
+                )
+                print(
+                    f"  Restored previous best {monitor}={prev_best:.4f} "
+                    f"({epoch_text})"
+                )
 
         lr_cfg = self.config.lr_schedule
-        warmup_epochs = getattr(lr_cfg, "warmup_epochs", 0) or 0
-        warmup_start_lr = getattr(lr_cfg, "warmup_start_lr", 1e-6)
-        target_lr = self.config.training.lr
+        warmup_epochs = int(getattr(lr_cfg, "warmup_epochs", 0) or 0)
+        warmup_start_lr = float(getattr(lr_cfg, "warmup_start_lr", 1e-6))
+        target_lr = float(self.config.training.lr)
 
-        print("=" * 70)
-        if start_epoch > 0:
-            print(f"  TRAINING RESUMED from epoch {start_epoch + 1}")
-        else:
-            print("  TRAINING START")
-        if warmup_epochs > 0:
-            print(f"  Warmup: {warmup_epochs} epochs ({warmup_start_lr:.1e} → {target_lr:.1e})")
-        print("=" * 70)
+        if self.is_main_process:
+            print("=" * 70)
+            if start_epoch > 0:
+                print(f"  TRAINING RESUMED from epoch {start_epoch + 1}")
+            else:
+                print("  TRAINING START")
+            if warmup_epochs > 0:
+                print(
+                    f"  Warmup: {warmup_epochs} epochs "
+                    f"({warmup_start_lr:.1e} → {target_lr:.1e})"
+                )
+            print("=" * 70)
 
+        last_epoch = start_epoch - 1
         for epoch in range(start_epoch, self.config.training.max_epochs):
+            last_epoch = epoch
+            if train_sampler is not None and hasattr(train_sampler, "set_epoch"):
+                train_sampler.set_epoch(epoch)
+
             # --- Warmup LR (linear ramp before main scheduler) ---
             if epoch < warmup_epochs:
-                warmup_lr = warmup_start_lr + (
-                    (target_lr - warmup_start_lr) * epoch / max(warmup_epochs, 1)
+                warmup_lr = _compute_warmup_lr(
+                    epoch=epoch,
+                    warmup_epochs=warmup_epochs,
+                    warmup_start_lr=warmup_start_lr,
+                    target_lr=target_lr,
                 )
                 for pg in self.optimizer.param_groups:
                     pg["lr"] = warmup_lr
@@ -272,30 +367,40 @@ class Trainer:
             self.log.log(epoch_metrics, step=epoch + 1)
 
             # --- Print ---
-            print(
-                f"Epoch {epoch + 1:03d} | "
-                f"loss={train_metrics['train_loss']:.4f} "
-                f"dice={train_metrics['train_dice']:.4f} | "
-                f"val_loss={val_metrics['val_loss']:.4f} "
-                f"val_dice={val_metrics['val_dice']:.4f} | "
-                f"lr={lr:.2e}"
-            )
+            if self.is_main_process:
+                print(
+                    f"Epoch {epoch + 1:03d} | "
+                    f"loss={train_metrics['train_loss']:.4f} "
+                    f"dice={train_metrics['train_dice']:.4f} | "
+                    f"val_loss={val_metrics['val_loss']:.4f} "
+                    f"val_dice={val_metrics['val_dice']:.4f} | "
+                    f"lr={lr:.2e}"
+                )
 
             # --- Checkpoint ---
             monitor_value = val_metrics[monitor]
-            is_best = checkpoint.step(
-                monitor_value,
-                self.model,
-                epoch,
-                extra={"val_iou": val_metrics["val_iou"]},
-                model_config=self.config.model.to_dict(),
-            )
-            if is_best:
-                best_metrics = epoch_metrics.copy()
-                print(f"  ✓ Best model saved ({monitor}={monitor_value:.4f})")
+            is_best = False
+            if self.is_main_process:
+                is_best = checkpoint.step(
+                    monitor_value,
+                    self.model,
+                    epoch,
+                    extra={"val_iou": val_metrics["val_iou"]},
+                    model_config=self.config.model.to_dict(),
+                )
+                if is_best:
+                    best_metrics = epoch_metrics.copy()
+                    print(f"  ✓ Best model saved ({monitor}={monitor_value:.4f})")
 
             # --- Save last checkpoint for resume ---
-            self._save_last_checkpoint(output_dir, epoch)
+            if self.is_main_process:
+                self._save_last_checkpoint(
+                    output_dir=output_dir,
+                    epoch=epoch,
+                    checkpoint=checkpoint,
+                    best_metrics=best_metrics,
+                    monitor=monitor,
+                )
 
             # --- LR Scheduler (skip during warmup) ---
             if epoch >= warmup_epochs:
@@ -306,34 +411,56 @@ class Trainer:
                     self.scheduler.step()
 
             # --- Early Stopping ---
-            if early_stop.step(monitor_value):
+            should_stop = False
+            if self.is_main_process and early_stop.step(monitor_value):
+                should_stop = True
                 print(
                     f"\nEarly stopping triggered at epoch {epoch + 1}. "
                     f"Best {monitor}: {early_stop.best:.4f}"
                 )
+
+            if self.is_distributed:
+                stop_tensor = torch.tensor(
+                    int(should_stop),
+                    device=self.device,
+                    dtype=torch.int32,
+                )
+                dist.broadcast(stop_tensor, src=0)
+                should_stop = bool(stop_tensor.item())
+
+            if should_stop:
                 break
 
-        print("=" * 70)
-        print("  TRAINING COMPLETE")
-        print("=" * 70)
-
-        # --- Save training curves ---
-        curves_path = output_dir / "training_curves.png"
-        plot_training_curves(self.log.history, curves_path)
-
-        # --- Save training summary ---
+        total_epochs = max(last_epoch + 1, start_epoch)
         summary = {
             "best_epoch": checkpoint.best_epoch,
             "best_metrics": best_metrics,
-            "total_epochs": epoch + 1,
+            "total_epochs": total_epochs,
         }
-        with open(output_dir / "training_summary.json", "w") as f:
-            json.dump(summary, f, indent=2)
+        if self.is_main_process:
+            print("=" * 70)
+            print("  TRAINING COMPLETE")
+            print("=" * 70)
 
-        self.log.log_summary(best_metrics)
+            # --- Save training curves ---
+            curves_path = output_dir / "training_curves.png"
+            plot_training_curves(self.log.history, curves_path)
+
+            # --- Save training summary ---
+            with open(output_dir / "training_summary.json", "w") as f:
+                json.dump(summary, f, indent=2)
+
+            self.log.log_summary(best_metrics)
         return summary
 
-    def _save_last_checkpoint(self, output_dir: Path, epoch: int) -> None:
+    def _save_last_checkpoint(
+        self,
+        output_dir: Path,
+        epoch: int,
+        checkpoint: ModelCheckpoint,
+        best_metrics: dict[str, Any],
+        monitor: str,
+    ) -> None:
         """Save full training state for resume (overwrites each epoch)."""
         model_ref = self.model.module if hasattr(self.model, "module") else self.model
         payload = {
@@ -342,8 +469,56 @@ class Trainer:
             "optimizer_state_dict": self.optimizer.state_dict(),
             "scheduler_state_dict": self.scheduler.state_dict(),
             "scaler_state_dict": self.scaler.state_dict(),
+            "monitor": monitor,
+            "best": checkpoint.best,
+            "best_epoch": checkpoint.best_epoch,
+            "best_metrics": best_metrics,
         }
         torch.save(payload, output_dir / "last_checkpoint.pth")
+
+    def _load_previous_best_state(
+        self,
+        output_dir: Path,
+        monitor: str,
+    ) -> tuple[float | None, int | None, dict[str, Any]]:
+        """
+        Restore previous best metric state for resume-safe checkpointing.
+        """
+        best = self._resume_state.get("best")
+        best_epoch = self._resume_state.get("best_epoch")
+        best_metrics = self._resume_state.get("best_metrics")
+        if not isinstance(best_metrics, dict):
+            best_metrics = {}
+        else:
+            best_metrics = best_metrics.copy()
+
+        best_model_path = output_dir / "best_model.pth"
+        if best_model_path.exists():
+            try:
+                ckpt = torch.load(best_model_path, map_location="cpu", weights_only=False)
+                if best is None and monitor in ckpt:
+                    best = float(ckpt[monitor])
+                if best_epoch is None and "epoch" in ckpt:
+                    best_epoch = int(ckpt["epoch"])
+            except Exception as exc:  # pragma: no cover - defensive path
+                logger.warning("Không đọc được best_model.pth để restore best state: %s", exc)
+
+        summary_path = output_dir / "training_summary.json"
+        if summary_path.exists():
+            try:
+                with open(summary_path, "r") as f:
+                    summary = json.load(f)
+                if not best_metrics and isinstance(summary.get("best_metrics"), dict):
+                    best_metrics = summary["best_metrics"]
+                if best_epoch is None and summary.get("best_epoch") is not None:
+                    best_epoch = int(summary["best_epoch"])
+            except Exception as exc:  # pragma: no cover - defensive path
+                logger.warning("Không đọc được training_summary.json để restore best state: %s", exc)
+
+        if best is None and isinstance(best_metrics.get(monitor), (float, int)):
+            best = float(best_metrics[monitor])
+
+        return best, best_epoch, best_metrics
 
     # ------------------------------------------------------------------
     # Checkpoint I/O
@@ -372,6 +547,11 @@ class Trainer:
                 self.scheduler.load_state_dict(ckpt["scheduler_state_dict"])
             if "scaler_state_dict" in ckpt:
                 self.scaler.load_state_dict(ckpt["scaler_state_dict"])
+            self._resume_state = {
+                "best": ckpt.get("best"),
+                "best_epoch": ckpt.get("best_epoch"),
+                "best_metrics": ckpt.get("best_metrics", {}),
+            }
             logger.info(
                 "Resumed full training state (optimizer + scheduler + scaler) "
                 "from %s at epoch %d",

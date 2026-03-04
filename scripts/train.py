@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Make sure the repo root is in PYTHONPATH so `src` can be imported
@@ -30,11 +32,20 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+import torch
+import torch.distributed as dist
+from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 from src.data.dataset import ISICDataset
 from src.data.transforms import get_transforms
 from src.models.segmentation import create_model
+from src.training.distributed import (
+    DistributedContext,
+    parse_torchrun_env,
+    single_process_context,
+)
 from src.training.trainer import Trainer
 from src.utils.config import load_config, override_config
 from src.utils.logger import Logger
@@ -52,7 +63,55 @@ log = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-def build_dataloaders(config) -> tuple[DataLoader, DataLoader]:
+class _NoOpLogger:
+    """No-op logger for non-main DDP ranks."""
+
+    def __init__(self) -> None:
+        self.history: list[dict[str, Any]] = []
+
+    def log(self, metrics: dict[str, float], step: int | None = None) -> None:
+        _ = metrics, step
+
+    def log_summary(self, summary: dict[str, float]) -> None:
+        _ = summary
+
+    def finish(self) -> None:
+        return
+
+
+def _init_runtime(device_mode: str) -> tuple[torch.device, DistributedContext]:
+    """
+    Initialize single-GPU or torchrun-based DDP runtime.
+    """
+    if device_mode == "single":
+        return get_device(), single_process_context()
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("device-mode=ddp yêu cầu CUDA (GPU).")
+
+    ctx = parse_torchrun_env(os.environ)
+    if not ctx.enabled:
+        raise RuntimeError(
+            "device-mode=ddp yêu cầu WORLD_SIZE > 1. "
+            "Hãy launch với torchrun --nproc_per_node=2 ..."
+        )
+
+    dist.init_process_group(backend="nccl")
+    torch.cuda.set_device(ctx.local_rank)
+    device = torch.device(f"cuda:{ctx.local_rank}")
+    return device, ctx
+
+
+def _cleanup_runtime(ctx: DistributedContext) -> None:
+    if ctx.enabled and dist.is_initialized():
+        dist.barrier()
+        dist.destroy_process_group()
+
+
+def build_dataloaders(
+    config,
+    dist_ctx: DistributedContext,
+) -> tuple[DataLoader, DataLoader, DistributedSampler | None]:
     """Xây dựng train/val DataLoader từ config."""
     root = Path(config.data.root)
 
@@ -67,10 +126,29 @@ def build_dataloaders(config) -> tuple[DataLoader, DataLoader]:
         transform=get_transforms("val", config),
     )
 
+    train_sampler: DistributedSampler | None = None
+    val_sampler: DistributedSampler | None = None
+    if dist_ctx.enabled:
+        train_sampler = DistributedSampler(
+            train_ds,
+            num_replicas=dist_ctx.world_size,
+            rank=dist_ctx.rank,
+            shuffle=True,
+            drop_last=True,
+        )
+        val_sampler = DistributedSampler(
+            val_ds,
+            num_replicas=dist_ctx.world_size,
+            rank=dist_ctx.rank,
+            shuffle=False,
+            drop_last=False,
+        )
+
     train_loader = DataLoader(
         train_ds,
         batch_size=config.training.batch_size,
-        shuffle=True,
+        shuffle=train_sampler is None,
+        sampler=train_sampler,
         num_workers=config.data.num_workers,
         pin_memory=config.data.pin_memory,
         persistent_workers=config.data.persistent_workers and config.data.num_workers > 0,
@@ -80,13 +158,15 @@ def build_dataloaders(config) -> tuple[DataLoader, DataLoader]:
         val_ds,
         batch_size=config.training.batch_size,
         shuffle=False,
+        sampler=val_sampler,
         num_workers=config.data.num_workers,
         pin_memory=config.data.pin_memory,
         persistent_workers=config.data.persistent_workers and config.data.num_workers > 0,
     )
 
-    log.info(f"Train: {len(train_ds)} samples | Val: {len(val_ds)} samples")
-    return train_loader, val_loader
+    if dist_ctx.is_main_process:
+        log.info(f"Train: {len(train_ds)} samples | Val: {len(val_ds)} samples")
+    return train_loader, val_loader, train_sampler
 
 
 # ---------------------------------------------------------------------------
@@ -109,6 +189,15 @@ def parse_args() -> argparse.Namespace:
         help="Path to last_checkpoint.pth to resume training from.",
     )
     parser.add_argument(
+        "--device-mode",
+        choices=["single", "ddp"],
+        default="single",
+        help=(
+            "single: local single-GPU/CPU training (default)\n"
+            "ddp: torchrun-based multi-GPU training (Kaggle 2xT4)"
+        ),
+    )
+    parser.add_argument(
         "overrides",
         nargs="*",
         metavar="key.subkey=value",
@@ -119,65 +208,109 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    dist_ctx = single_process_context()
+    run_logger: Logger | _NoOpLogger = _NoOpLogger()
 
-    # 1. Load & override config
-    config = load_config(args.config)
-    config = override_config(config, args.overrides)
+    try:
+        # 1. Load & override config
+        config = load_config(args.config)
+        config = override_config(config, args.overrides)
 
-    # Auto-set experiment name from config file stem if not provided
-    if not config.logging.experiment_name:
-        config["logging"]["experiment_name"] = Path(args.config).stem
+        # Auto-set experiment name from config file stem if not provided
+        if not config.logging.experiment_name:
+            config["logging"]["experiment_name"] = Path(args.config).stem
 
-    # 2. Reproducibility
-    set_seed(config.seed)
+        # 2. Reproducibility
+        set_seed(config.seed)
 
-    # 3. Device
-    device = get_device()
-    log.info(f"Device: {device}")
+        # 3. Device / distributed runtime
+        device, dist_ctx = _init_runtime(args.device_mode)
+        if dist_ctx.enabled and not dist_ctx.is_main_process:
+            logging.getLogger().setLevel(logging.WARNING)
+        if dist_ctx.is_main_process:
+            log.info(
+                "Device: %s | mode=%s | world_size=%d",
+                device,
+                args.device_mode,
+                dist_ctx.world_size,
+            )
 
-    # 4. Output directory
-    output_dir = Path(config.output.dir) / config.logging.experiment_name
-    output_dir.mkdir(parents=True, exist_ok=True)
-    log.info(f"Output: {output_dir}")
+        # 4. Output directory
+        output_dir = Path(config.output.dir) / config.logging.experiment_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if dist_ctx.is_main_process:
+            log.info(f"Output: {output_dir}")
 
-    # 5. Logger (W&B + local)
-    logger = Logger(config, output_dir)
+        # 5. Logger (W&B + local) chỉ trên main process
+        if dist_ctx.is_main_process:
+            run_logger = Logger(config, output_dir)
 
-    # 6. Data
-    train_loader, val_loader = build_dataloaders(config)
+        # 6. Data
+        train_loader, val_loader, train_sampler = build_dataloaders(config, dist_ctx)
 
-    # 7. Model
-    model = create_model(config).to(device)
-    params = count_parameters(model)
-    log.info(
-        f"Model: {config.model.name} | {config.model.encoder_name} | "
-        f"params={params['trainable']:,} ({params['size_mb']:.1f} MB)"
-    )
+        # 7. Model
+        model = create_model(config).to(device)
+        if dist_ctx.enabled:
+            model = DDP(
+                model,
+                device_ids=[dist_ctx.local_rank],
+                output_device=dist_ctx.local_rank,
+            )
 
-    # 8. Trainer
-    trainer = Trainer(model, config, device, logger)
+        model_ref = model.module if hasattr(model, "module") else model
+        params = count_parameters(model_ref)
+        if dist_ctx.is_main_process:
+            log.info(
+                f"Model: {config.model.name} | {config.model.encoder_name} | "
+                f"params={params['trainable']:,} ({params['size_mb']:.1f} MB)"
+            )
 
-    # 8b. Resume from checkpoint if requested
-    start_epoch = 0
-    if args.resume:
-        ckpt = trainer.load_checkpoint(args.resume, resume=True)
-        start_epoch = ckpt.get("epoch", -1) + 1
-        log.info(f"Resuming from epoch {start_epoch + 1}")
-
-    # 9. Fit
-    summary = trainer.fit(train_loader, val_loader, output_dir, start_epoch=start_epoch)
-
-    # 10. Finish logging
-    logger.finish()
-
-    best_dice = summary["best_metrics"].get("val_dice")
-    if best_dice is not None:
-        log.info(
-            f"Done. Best val_dice={best_dice:.4f} "
-            f"at epoch {summary['best_epoch'] + 1}"
+        # 8. Trainer
+        trainer = Trainer(
+            model=model,
+            config=config,
+            device=device,
+            log=run_logger,
+            is_distributed=dist_ctx.enabled,
+            is_main_process=dist_ctx.is_main_process,
         )
-    else:
-        log.warning("Training finished without improvement.")
+
+        # 8b. Resume from checkpoint if requested
+        start_epoch = 0
+        if args.resume:
+            ckpt = trainer.load_checkpoint(args.resume, resume=True)
+            start_epoch = ckpt.get("epoch", -1) + 1
+            if dist_ctx.is_main_process:
+                log.info(f"Resuming from epoch {start_epoch + 1}")
+
+        # 9. Fit
+        summary = trainer.fit(
+            train_loader,
+            val_loader,
+            output_dir,
+            start_epoch=start_epoch,
+            train_sampler=train_sampler,
+        )
+        if dist_ctx.enabled:
+            dist.barrier()
+
+        # 10. Finish logging (main process only)
+        if dist_ctx.is_main_process:
+            run_logger.finish()
+
+            best_dice = summary["best_metrics"].get("val_dice")
+            best_epoch = summary.get("best_epoch")
+            if best_dice is not None and best_epoch is not None:
+                log.info(
+                    f"Done. Best val_dice={best_dice:.4f} "
+                    f"at epoch {best_epoch + 1}"
+                )
+            elif best_dice is not None:
+                log.info(f"Done. Best val_dice={best_dice:.4f}")
+            else:
+                log.warning("Training finished without improvement.")
+    finally:
+        _cleanup_runtime(dist_ctx)
 
 
 if __name__ == "__main__":

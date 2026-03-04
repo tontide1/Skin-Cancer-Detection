@@ -89,12 +89,14 @@ class ModelCheckpoint:
         save_path: Path | str,
         mode: str = "max",
         monitor: str = "val_dice",
+        best: float | None = None,
+        best_epoch: int | None = None,
     ):
         self.save_path  = Path(save_path)
         self.mode       = mode
         self.monitor    = monitor
-        self.best       = None
-        self.best_epoch: int | None = None
+        self.best       = best
+        self.best_epoch = best_epoch
 
     def step(
         self,

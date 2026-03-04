@@ -40,7 +40,6 @@ from src.data.dataset import ISICDataset
 from src.data.transforms import get_transforms
 from src.inference.tta import tta_predict
 from src.losses.segmentation import CombinedLoss
-from src.metrics.segmentation import dice_coefficient, find_best_threshold, iou_score
 from src.models.segmentation import create_model
 from src.utils.checkpoint import load_state_dict_with_aux_compat
 from src.utils.config import load_config, override_config
@@ -69,10 +68,11 @@ def evaluate(
 ) -> dict:
     """Run full evaluation pass. Returns metric dict."""
     model.eval()
-    total_loss = total_dice = total_iou = 0.0
-
-    all_preds:  list[torch.Tensor] = []
-    all_masks:  list[torch.Tensor] = []
+    total_loss = 0.0
+    thresholds = [round(t, 2) for t in torch.arange(0.3, 0.71, 0.05).tolist()]
+    dice_sums = [0.0 for _ in thresholds]
+    iou_sums = [0.0 for _ in thresholds]
+    total_samples = 0
 
     for images, masks in tqdm(loader, desc="Evaluating"):
         images = images.to(device)
@@ -89,35 +89,38 @@ def evaluate(
 
         n = images.size(0)
         total_loss += loss.item() * n
-        total_dice += dice_coefficient(logits, masks, threshold) * n
-        total_iou  += iou_score(logits, masks, threshold) * n
+        total_samples += n
 
-        all_preds.append(probs.cpu())
-        all_masks.append(masks.cpu())
+        probs_flat = probs.view(n, -1)
+        masks_flat = masks.float().view(n, -1)
+        target_sum = masks_flat.sum(dim=1)
 
-    n_total = len(loader.dataset)
+        for idx, thr in enumerate(thresholds):
+            pred_flat = (probs_flat > thr).float()
+            intersection = (pred_flat * masks_flat).sum(dim=1)
+            pred_sum = pred_flat.sum(dim=1)
 
-    # Concatenate all preds for threshold search
-    all_preds_t = torch.cat(all_preds, dim=0)
-    all_masks_t = torch.cat(all_masks, dim=0)
+            dice = (2.0 * intersection + 1e-7) / (pred_sum + target_sum + 1e-7)
+            iou = (intersection + 1e-7) / (pred_sum + target_sum - intersection + 1e-7)
 
-    # Find best threshold on the full eval set
-    best_thr, best_dice = find_best_threshold(
-        torch.logit(all_preds_t.clamp(1e-6, 1 - 1e-6)),
-        all_masks_t,
-    )
+            dice_sums[idx] += float(dice.sum().item())
+            iou_sums[idx] += float(iou.sum().item())
+
+    if total_samples == 0:
+        raise RuntimeError("Loader rỗng, không có sample để evaluate.")
+
+    mean_dice = [s / total_samples for s in dice_sums]
+    mean_iou = [s / total_samples for s in iou_sums]
+    idx_05 = min(range(len(thresholds)), key=lambda i: abs(thresholds[i] - threshold))
+    best_idx = max(range(len(thresholds)), key=lambda i: mean_dice[i])
 
     return {
-        "loss":       total_loss / n_total,
-        "dice":       total_dice / n_total,
-        "iou":        total_iou  / n_total,
-        "best_threshold": best_thr,
-        "best_dice_at_best_thr": best_dice,
-        "best_iou_at_best_thr":  iou_score(
-            torch.logit(all_preds_t.clamp(1e-6, 1 - 1e-6)),
-            all_masks_t,
-            best_thr,
-        ),
+        "loss": total_loss / total_samples,
+        "dice": mean_dice[idx_05],
+        "iou": mean_iou[idx_05],
+        "best_threshold": thresholds[best_idx],
+        "best_dice_at_best_thr": mean_dice[best_idx],
+        "best_iou_at_best_thr": mean_iou[best_idx],
     }
 
 
