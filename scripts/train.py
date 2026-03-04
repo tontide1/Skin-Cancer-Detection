@@ -63,6 +63,7 @@ log = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 class _NoOpLogger:
     """No-op logger for non-main DDP ranks."""
 
@@ -92,8 +93,7 @@ def _init_runtime(device_mode: str) -> tuple[torch.device, DistributedContext]:
     ctx = parse_torchrun_env(os.environ)
     if not ctx.enabled:
         raise RuntimeError(
-            "device-mode=ddp yêu cầu WORLD_SIZE > 1. "
-            "Hãy launch với torchrun --nproc_per_node=2 ..."
+            "device-mode=ddp yêu cầu WORLD_SIZE > 1. Hãy launch với torchrun --nproc_per_node=2 ..."
         )
 
     dist.init_process_group(backend="nccl")
@@ -154,9 +154,12 @@ def build_dataloaders(
         persistent_workers=config.data.persistent_workers and config.data.num_workers > 0,
         drop_last=True,
     )
+    val_batch_size = config.training.batch_size * int(
+        getattr(config.data, "val_batch_size_multiplier", 2)
+    )
     val_loader = DataLoader(
         val_ds,
-        batch_size=config.training.batch_size,
+        batch_size=val_batch_size,
         shuffle=False,
         sampler=val_sampler,
         num_workers=config.data.num_workers,
@@ -173,18 +176,21 @@ def build_dataloaders(
 # Main
 # ---------------------------------------------------------------------------
 
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Train skin lesion segmentation model",
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
-        "--config", "-c",
+        "--config",
+        "-c",
         required=True,
         help="Path to experiment YAML config file.\nExample: configs/experiments/resnet34_unet_v1.yaml",
     )
     parser.add_argument(
-        "--resume", "-r",
+        "--resume",
+        "-r",
         default=None,
         help="Path to last_checkpoint.pth to resume training from.",
     )
@@ -221,7 +227,7 @@ def main() -> None:
             config["logging"]["experiment_name"] = Path(args.config).stem
 
         # 2. Reproducibility
-        set_seed(config.seed)
+        set_seed(config.seed, deterministic=bool(getattr(config.training, "deterministic", True)))
 
         # 3. Device / distributed runtime
         device, dist_ctx = _init_runtime(args.device_mode)
@@ -301,10 +307,7 @@ def main() -> None:
             best_dice = summary["best_metrics"].get("val_dice")
             best_epoch = summary.get("best_epoch")
             if best_dice is not None and best_epoch is not None:
-                log.info(
-                    f"Done. Best val_dice={best_dice:.4f} "
-                    f"at epoch {best_epoch + 1}"
-                )
+                log.info(f"Done. Best val_dice={best_dice:.4f} at epoch {best_epoch + 1}")
             elif best_dice is not None:
                 log.info(f"Done. Best val_dice={best_dice:.4f}")
             else:

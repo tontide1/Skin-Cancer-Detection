@@ -28,6 +28,14 @@ training:
   weight_decay: 1.0e-4
   mixed_precision: true
   grad_clip: null                     # null | float (max norm)
+  deterministic: true                 # true = cuDNN deterministic + benchmark=False (reproducible)
+                                      # false = cuDNN benchmark=True (faster, non-deterministic)
+
+  # Differential learning rate (encoder trains slower than decoder)
+  # Requires model to expose a .encoder attribute (SMP models) or .model attribute (DeepLabV3Wrapper)
+  differential_lr:
+    enabled: false                    # set true to enable encoder/decoder split LR
+    encoder_lr_scale: 0.1             # encoder_lr = lr * encoder_lr_scale
 
   loss:
     focal_weight: 0.5
@@ -68,6 +76,8 @@ data:
   num_workers: 2
   pin_memory: true
   persistent_workers: true
+  val_batch_size_multiplier: 2        # val loader batch_size = training.batch_size * this value
+                                      # val has no gradient storage → can fit 2x safely
 
 # -----------------------------------------------------------------------------
 # Logging — W&B

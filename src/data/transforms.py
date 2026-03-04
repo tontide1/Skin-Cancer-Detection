@@ -26,9 +26,11 @@ def get_transforms(split: str, config) -> A.Compose:
     Return an Albumentations ``Compose`` pipeline for the requested split.
 
     Args:
-        split:  One of ``"train"``, ``"val"``, ``"test"``, etc.
-                Any value not equal to ``"train"`` receives the val/test
-                pipeline (resize + normalise only).
+        split:  One of ``"train"``, ``"val"``, ``"test"``, ``"predict"``, etc.
+                Values present in ``_VAL_SPLITS`` receive the val/test pipeline
+                (resize + normalise only, zero augmentation).
+                Unrecognised splits fall through to the training pipeline —
+                pass ``"train"`` explicitly to get full augmentation.
         config: Project config object (``src.utils.config.Config``).
                 Must expose ``config.data.input_size`` as a sequence ``[H, W]``.
 
@@ -55,10 +57,12 @@ def get_transforms(split: str, config) -> A.Compose:
         # mask:  HW  float32 → HW float32 tensor (no new axis)
     ]
 
+    normalized_split = split.lower()
+
     # ------------------------------------------------------------------
     # Validation / test — no augmentation
     # ------------------------------------------------------------------
-    if split.lower() not in {"train"}:
+    if normalized_split in _VAL_SPLITS:
         return A.Compose(
             [A.Resize(height, width)] + _tail,
         )
@@ -81,11 +85,7 @@ def get_transforms(split: str, config) -> A.Compose:
                 p=0.5,
             ),
             # --- Elastic / morphological ---
-            A.ElasticTransform(
-                alpha=1.0,
-                sigma=50,
-                p=0.2,
-            ),
+            A.ElasticTransform(alpha=120.0, sigma=8.0, p=0.2),
             A.GridDistortion(num_steps=5, distort_limit=0.1, p=0.2),
             # --- Colour / intensity (image only — mask unaffected) ---
             A.RandomBrightnessContrast(

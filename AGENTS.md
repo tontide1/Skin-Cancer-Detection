@@ -61,7 +61,7 @@ Skin-Cancer-Detection/
 └── src/                             ← Installable Python package
     ├── data/                        ← ISICDataset, get_transforms
     ├── losses/                      ← FocalLoss, SoftDiceLoss, CombinedLoss
-    ├── metrics/                     ← dice_coefficient, iou_score, find_best_threshold
+    ├── metrics/                     ← dice_coefficient, iou_score
     ├── models/                      ← Registry-based model factory (create_model)
     ├── training/                    ← Trainer, EarlyStopping, ModelCheckpoint
     └── utils/                       ← Config, load_config, Logger, set_seed, checkpoint

@@ -10,14 +10,23 @@ import torch
 import matplotlib.pyplot as plt
 
 
-def set_seed(seed: int = 42) -> None:
-    """Set random seed để reproducible."""
+def set_seed(seed: int = 42, deterministic: bool = True) -> None:
+    """
+    Set random seed để reproducible.
+
+    Args:
+        seed:          Random seed cho tất cả RNGs.
+        deterministic: If True (default), bật cuDNN deterministic mode và tắt benchmark
+                       → fully reproducible nhưng chậm hơn ~10-30%.
+                       If False, chỉ set seeds — cuDNN benchmark vẫn bật
+                       → nhanh hơn, phù hợp production training.
+    """
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = deterministic
+    torch.backends.cudnn.benchmark = not deterministic
 
 
 def get_device() -> torch.device:

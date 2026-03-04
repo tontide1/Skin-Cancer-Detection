@@ -69,10 +69,10 @@ class Trainer:
         is_distributed: bool = False,
         is_main_process: bool = True,
     ):
-        self.model  = model
+        self.model = model
         self.config = config
         self.device = device
-        self.log    = log
+        self.log = log
         self.is_distributed = is_distributed
         self.is_main_process = is_main_process
         self._resume_state: dict[str, Any] = {}
@@ -97,25 +97,85 @@ class Trainer:
     # ------------------------------------------------------------------
 
     def _build_optimizer(self) -> torch.optim.Optimizer:
-        cfg  = self.config.training
+        cfg = self.config.training
         name = cfg.optimizer.lower()
+
+        params = self._get_param_groups(cfg)
+
         if name == "adamw":
-            return torch.optim.AdamW(
-                self.model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay
-            )
+            return torch.optim.AdamW(params, lr=cfg.lr, weight_decay=cfg.weight_decay)
         if name == "adam":
-            return torch.optim.Adam(
-                self.model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay
-            )
+            return torch.optim.Adam(params, lr=cfg.lr, weight_decay=cfg.weight_decay)
         if name == "sgd":
             return torch.optim.SGD(
-                self.model.parameters(), lr=cfg.lr,
-                weight_decay=cfg.weight_decay, momentum=0.9,
+                params,
+                lr=cfg.lr,
+                weight_decay=cfg.weight_decay,
+                momentum=0.9,
             )
         raise ValueError(f"Optimizer '{name}' chưa được hỗ trợ.")
 
+    def _get_param_groups(self, cfg: Any) -> Any:
+        """
+        Build parameter groups for the optimizer.
+
+        When ``training.differential_lr.enabled`` is True, splits parameters
+        into encoder (lower LR) and decoder (full LR) groups.  Falls back
+        gracefully to a single group if the model structure is not recognised.
+
+        Supports:
+        - SMP models: expose ``.encoder`` attribute
+        - DeepLabV3Wrapper: expose ``.model`` attribute (torchvision)
+        - DDP-wrapped models: unwrap ``.module`` first
+
+        Args:
+            cfg: ``config.training`` sub-config object.
+
+        Returns:
+            Either the model itself (single-LR path) or a list of param-group
+            dicts (differential-LR path).
+        """
+        diff_lr_cfg = getattr(cfg, "differential_lr", None)
+        if diff_lr_cfg is None or not getattr(diff_lr_cfg, "enabled", False):
+            return self.model.parameters()
+
+        # Unwrap DDP
+        model_ref = self.model.module if hasattr(self.model, "module") else self.model
+
+        encoder: torch.nn.Module | None = None
+
+        # SMP models (UNet, DeepLabV3+ via SMP, ...)
+        if hasattr(model_ref, "encoder"):
+            encoder = model_ref.encoder
+        # DeepLabV3Wrapper (torchvision) — backbone acts as encoder
+        elif hasattr(model_ref, "model") and hasattr(model_ref.model, "backbone"):
+            encoder = model_ref.model.backbone
+
+        if encoder is None:
+            logger.warning(
+                "differential_lr.enabled=true but model exposes neither .encoder "
+                "nor .model.backbone — falling back to single learning rate."
+            )
+            return self.model.parameters()
+
+        encoder_lr = cfg.lr * float(getattr(diff_lr_cfg, "encoder_lr_scale", 0.1))
+        encoder_ids = {id(p) for p in encoder.parameters()}
+
+        decoder_params = [p for p in model_ref.parameters() if id(p) not in encoder_ids]
+        encoder_params = list(encoder.parameters())
+
+        logger.info(
+            "Differential LR: encoder_lr=%.2e, decoder_lr=%.2e",
+            encoder_lr,
+            cfg.lr,
+        )
+        return [
+            {"params": encoder_params, "lr": encoder_lr},
+            {"params": decoder_params, "lr": cfg.lr},
+        ]
+
     def _build_scheduler(self) -> Any:
-        cfg  = self.config.lr_schedule
+        cfg = self.config.lr_schedule
         name = cfg.scheduler.lower()
         if name == "reduce_on_plateau":
             return torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -172,7 +232,7 @@ class Trainer:
         pbar = tqdm(loader, desc="Train", leave=False, disable=not self.is_main_process)
         for images, masks in pbar:
             images = images.to(self.device)
-            masks  = masks.to(self.device)
+            masks = masks.to(self.device)
 
             self.optimizer.zero_grad(set_to_none=True)
 
@@ -181,7 +241,7 @@ class Trainer:
                 enabled=self.config.training.mixed_precision,
             ):
                 logits = self.model(images)
-                loss   = self.criterion(logits, masks)
+                loss = self.criterion(logits, masks)
 
             self.scaler.scale(loss).backward()
 
@@ -200,7 +260,7 @@ class Trainer:
             n = images.size(0)
             total_loss += loss.item() * n
             total_dice += d * n
-            total_iou  += i * n
+            total_iou += i * n
             n_samples += n
 
             if self.is_main_process:
@@ -214,49 +274,86 @@ class Trainer:
         return {
             "train_loss": total_loss / n_samples,
             "train_dice": total_dice / n_samples,
-            "train_iou":  total_iou  / n_samples,
+            "train_iou": total_iou / n_samples,
         }
 
     @torch.no_grad()
     def validate(self, loader: DataLoader) -> dict:
-        """Validate model. Returns dict metrics."""
+        """
+        Validate model. Returns dict metrics.
+
+        Dice và IoU được tính per-sample (accumulate intersection/union trực tiếp)
+        thay vì per-batch-mean, tránh sai lệch do last incomplete batch.
+        """
         self.model.eval()
-        total_loss = total_dice = total_iou = 0.0
+        total_loss = 0.0
+        # Per-sample accumulators (threshold=0.5)
+        total_intersection = total_pred_sum = total_target_sum = 0.0
         n_samples = 0
 
         pbar = tqdm(loader, desc="Val  ", leave=False, disable=not self.is_main_process)
         for images, masks in pbar:
             images = images.to(self.device)
-            masks  = masks.to(self.device)
+            masks = masks.to(self.device)
 
             with torch.amp.autocast(
                 device_type=self.device.type,
                 enabled=self.config.training.mixed_precision,
             ):
                 logits = self.model(images)
-                loss   = self.criterion(logits, masks)
-
-            d = dice_coefficient(logits, masks)
-            i = iou_score(logits, masks)
+                loss = self.criterion(logits, masks)
 
             n = images.size(0)
             total_loss += loss.item() * n
-            total_dice += d * n
-            total_iou  += i * n
+
+            # Per-sample Dice/IoU — accumulate raw counts, divide once at end
+            probs = torch.sigmoid(logits)
+            binary = (probs > 0.5).float()
+            flat_pred = binary.view(n, -1)
+            flat_mask = masks.float().view(n, -1)
+
+            intersection = (flat_pred * flat_mask).sum(dim=1)
+            pred_sum = flat_pred.sum(dim=1)
+            target_sum = flat_mask.sum(dim=1)
+
+            total_intersection += float(intersection.sum().item())
+            total_pred_sum += float(pred_sum.sum().item())
+            total_target_sum += float(target_sum.sum().item())
             n_samples += n
 
             if self.is_main_process:
-                pbar.set_postfix(dice=f"{d:.4f}")
+                # Show approximate per-batch dice for progress bar
+                batch_dice = float(
+                    ((2.0 * intersection + 1e-7) / (pred_sum + target_sum + 1e-7)).mean().item()
+                )
+                pbar.set_postfix(dice=f"{batch_dice:.4f}")
 
-        total_loss, total_dice, total_iou, n_samples = self._sync_epoch_totals(
-            total_loss, total_dice, total_iou, n_samples
+        # Sync across DDP workers
+        sync_stats = torch.tensor(
+            [total_loss, total_intersection, total_pred_sum, total_target_sum, float(n_samples)],
+            device=self.device,
+            dtype=torch.float64,
         )
+        if self.is_distributed:
+            dist.all_reduce(sync_stats, op=dist.ReduceOp.SUM)
+        total_loss = float(sync_stats[0].item())
+        total_intersection = float(sync_stats[1].item())
+        total_pred_sum = float(sync_stats[2].item())
+        total_target_sum = float(sync_stats[3].item())
+        n_samples = int(sync_stats[4].item())
+
         if n_samples == 0:
             raise RuntimeError("Validation loader không có sample nào.")
+
+        eps = 1e-7
+        val_dice = (2.0 * total_intersection + eps) / (total_pred_sum + total_target_sum + eps)
+        val_iou = (total_intersection + eps) / (
+            total_pred_sum + total_target_sum - total_intersection + eps
+        )
         return {
             "val_loss": total_loss / n_samples,
-            "val_dice": total_dice / n_samples,
-            "val_iou":  total_iou  / n_samples,
+            "val_dice": val_dice,
+            "val_iou": val_iou,
         }
 
     # ------------------------------------------------------------------
@@ -287,7 +384,7 @@ class Trainer:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        cfg_es  = self.config.early_stopping
+        cfg_es = self.config.early_stopping
         monitor = cfg_es.monitor  # "val_dice"
 
         checkpoint = ModelCheckpoint(
@@ -316,10 +413,7 @@ class Trainer:
                     if prev_best_epoch is not None
                     else "epoch unknown"
                 )
-                print(
-                    f"  Restored previous best {monitor}={prev_best:.4f} "
-                    f"({epoch_text})"
-                )
+                print(f"  Restored previous best {monitor}={prev_best:.4f} ({epoch_text})")
 
         lr_cfg = self.config.lr_schedule
         warmup_epochs = int(getattr(lr_cfg, "warmup_epochs", 0) or 0)
@@ -333,10 +427,7 @@ class Trainer:
             else:
                 print("  TRAINING START")
             if warmup_epochs > 0:
-                print(
-                    f"  Warmup: {warmup_epochs} epochs "
-                    f"({warmup_start_lr:.1e} → {target_lr:.1e})"
-                )
+                print(f"  Warmup: {warmup_epochs} epochs ({warmup_start_lr:.1e} → {target_lr:.1e})")
             print("=" * 70)
 
         last_epoch = start_epoch - 1
@@ -358,7 +449,7 @@ class Trainer:
 
             # --- Train ---
             train_metrics = self.train_one_epoch(train_loader)
-            val_metrics   = self.validate(val_loader)
+            val_metrics = self.validate(val_loader)
 
             lr = self.optimizer.param_groups[0]["lr"]
             epoch_metrics = {**train_metrics, **val_metrics, "lr": lr}
@@ -473,6 +564,7 @@ class Trainer:
             "best": checkpoint.best,
             "best_epoch": checkpoint.best_epoch,
             "best_metrics": best_metrics,
+            "training_history": self.log.history,
         }
         torch.save(payload, output_dir / "last_checkpoint.pth")
 
@@ -495,7 +587,7 @@ class Trainer:
         best_model_path = output_dir / "best_model.pth"
         if best_model_path.exists():
             try:
-                ckpt = torch.load(best_model_path, map_location="cpu", weights_only=False)
+                ckpt = torch.load(best_model_path, map_location="cpu", weights_only=True)
                 if best is None and monitor in ckpt:
                     best = float(ckpt[monitor])
                 if best_epoch is None and "epoch" in ckpt:
@@ -513,7 +605,9 @@ class Trainer:
                 if best_epoch is None and summary.get("best_epoch") is not None:
                     best_epoch = int(summary["best_epoch"])
             except Exception as exc:  # pragma: no cover - defensive path
-                logger.warning("Không đọc được training_summary.json để restore best state: %s", exc)
+                logger.warning(
+                    "Không đọc được training_summary.json để restore best state: %s", exc
+                )
 
         if best is None and isinstance(best_metrics.get(monitor), (float, int)):
             best = float(best_metrics[monitor])
@@ -536,7 +630,7 @@ class Trainer:
         Returns:
             The raw checkpoint dict (caller can inspect ``ckpt["epoch"]`` etc.).
         """
-        ckpt = torch.load(path, map_location=self.device, weights_only=False)
+        ckpt = torch.load(path, map_location=self.device, weights_only=True)
         state = ckpt.get("model_state_dict", ckpt)
         load_state_dict_with_aux_compat(self.model, state, context=str(path))
 
@@ -547,14 +641,16 @@ class Trainer:
                 self.scheduler.load_state_dict(ckpt["scheduler_state_dict"])
             if "scaler_state_dict" in ckpt:
                 self.scaler.load_state_dict(ckpt["scaler_state_dict"])
+            # Restore training history so curves show the full run
+            if "training_history" in ckpt and isinstance(ckpt["training_history"], list):
+                self.log.history = ckpt["training_history"]
             self._resume_state = {
                 "best": ckpt.get("best"),
                 "best_epoch": ckpt.get("best_epoch"),
                 "best_metrics": ckpt.get("best_metrics", {}),
             }
             logger.info(
-                "Resumed full training state (optimizer + scheduler + scaler) "
-                "from %s at epoch %d",
+                "Resumed full training state (optimizer + scheduler + scaler) from %s at epoch %d",
                 path,
                 ckpt.get("epoch", -1) + 1,
             )

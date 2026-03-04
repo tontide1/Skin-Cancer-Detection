@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 
-from src.metrics.segmentation import dice_coefficient, find_best_threshold, iou_score
+from src.metrics.segmentation import dice_coefficient, iou_score
 
 
 # ---------------------------------------------------------------------------
@@ -68,31 +68,3 @@ class TestIoUScore:
         d = dice_coefficient(logits, targets)
         i = iou_score(logits, targets)
         assert i <= d + 1e-6
-
-
-# ---------------------------------------------------------------------------
-# find_best_threshold
-# ---------------------------------------------------------------------------
-
-
-class TestFindBestThreshold:
-    def test_returns_tuple(self) -> None:
-        logits = torch.randn(4, 1, 16, 16)
-        targets = torch.randint(0, 2, (4, 1, 16, 16)).float()
-        result = find_best_threshold(logits, targets)
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-
-    def test_threshold_in_range(self) -> None:
-        logits = torch.randn(4, 1, 16, 16)
-        targets = torch.randint(0, 2, (4, 1, 16, 16)).float()
-        thr, dice = find_best_threshold(logits, targets)
-        assert 0.3 <= thr <= 0.7
-        assert 0.0 <= dice <= 1.0
-
-    def test_custom_thresholds(self) -> None:
-        targets = torch.ones(2, 1, 8, 8)
-        logits = torch.full_like(targets, 10.0)
-        thr, dice = find_best_threshold(logits, targets, thresholds=[0.1, 0.5, 0.9])
-        assert thr in {0.1, 0.5, 0.9}
-        assert dice > 0.99

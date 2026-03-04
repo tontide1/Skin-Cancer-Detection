@@ -93,9 +93,7 @@ def test_compute_warmup_lr_reaches_target_on_last_warmup_epoch() -> None:
     warmup_epochs = 4
 
     first_epoch_lr = _compute_warmup_lr(0, warmup_epochs, start_lr, target_lr)
-    last_epoch_lr = _compute_warmup_lr(
-        warmup_epochs - 1, warmup_epochs, start_lr, target_lr
-    )
+    last_epoch_lr = _compute_warmup_lr(warmup_epochs - 1, warmup_epochs, start_lr, target_lr)
 
     assert first_epoch_lr == pytest.approx(start_lr + (target_lr - start_lr) / warmup_epochs)
     assert last_epoch_lr == pytest.approx(target_lr)
@@ -170,5 +168,5 @@ def test_resume_preserves_previous_best_checkpoint(tmp_path) -> None:
     assert summary["best_epoch"] == 4
     assert summary["best_metrics"]["val_dice"] == pytest.approx(0.9)
 
-    best_ckpt_after = torch.load(best_model_path, map_location="cpu", weights_only=False)
+    best_ckpt_after = torch.load(best_model_path, map_location="cpu", weights_only=True)
     assert best_ckpt_after["val_dice"] == pytest.approx(0.9)

@@ -579,7 +579,7 @@ Use @python-pro to create a pytest test suite for the src/ package.
 
 Relevant files:
 - src/losses/segmentation.py (FocalLoss, SoftDiceLoss, CombinedLoss)
-- src/metrics/segmentation.py (dice_coefficient, iou_score, find_best_threshold)
+- src/metrics/segmentation.py (dice_coefficient, iou_score)
 - src/models/segmentation.py (create_model, _REGISTRY)
 - src/utils/config.py (load_config, override_config)
 - AGENTS.md ("No tests exist yet. When adding, use pytest")

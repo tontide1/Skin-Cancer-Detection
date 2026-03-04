@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from typing import Any
 
@@ -48,16 +47,6 @@ class Logger:
             self.use_wandb = False
             return
 
-        api_key = os.environ.get("WANDB_API_KEY")
-        if not api_key:
-            logger.warning(
-                "WANDB_API_KEY chưa được set. "
-                "Chạy: export WANDB_API_KEY=<your_key> hoặc set logging.use_wandb=false. "
-                "Fallback về local logging."
-            )
-            self.use_wandb = False
-            return
-
         experiment_name = config.logging.experiment_name
         entity = config.logging.entity if config.logging.entity else None
 
@@ -86,6 +75,7 @@ class Logger:
 
         if self.use_wandb and self._wandb_run:
             import wandb
+
             self._wandb_run.log(metrics, step=step)
 
     def log_summary(self, summary: dict) -> None:
@@ -98,6 +88,7 @@ class Logger:
         """Log image lên W&B."""
         if self.use_wandb and self._wandb_run:
             import wandb
+
             self._wandb_run.log({key: wandb.Image(str(image_path))})
 
     # ------------------------------------------------------------------

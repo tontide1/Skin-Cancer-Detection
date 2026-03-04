@@ -13,20 +13,39 @@ from typing import Any
 
 
 class Config(dict):
-    """Dict với dot-notation access. Hỗ trợ nested access."""
+    """
+    Dict với dot-notation access. Hỗ trợ nested access.
+
+    Nested dicts được wrap thành Config ngay trong ``__init__`` (eager wrapping),
+    do đó ``config.model is config.model`` luôn trả về cùng object và
+    mutation qua ``config.model.name = "x"`` hoạt động đúng.
+    """
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # Wrap tất cả nested dict thành Config một lần duy nhất
+        for k, v in self.items():
+            if isinstance(v, dict) and not isinstance(v, Config):
+                super().__setitem__(k, Config(v))
 
     def __getattr__(self, key: str) -> Any:
         try:
-            val = self[key]
-            return Config(val) if isinstance(val, dict) else val
+            return self[key]
         except KeyError:
             raise AttributeError(f"Config has no attribute '{key}'")
 
     def __setattr__(self, key: str, val: Any) -> None:
         self[key] = val
 
+    def __setitem__(self, key: str, val: Any) -> None:
+        # Auto-wrap on assignment too
+        if isinstance(val, dict) and not isinstance(val, Config):
+            val = Config(val)
+        super().__setitem__(key, val)
+
     def __repr__(self) -> str:
         import json
+
         return json.dumps(dict(self), indent=2, default=str)
 
     def to_dict(self) -> dict:
@@ -185,9 +204,7 @@ def override_config(
 
     for item in overrides:
         if "=" not in item:
-            raise ValueError(
-                f"Override '{item}' không hợp lệ. Phải có dạng 'key.subkey=value'"
-            )
+            raise ValueError(f"Override '{item}' không hợp lệ. Phải có dạng 'key.subkey=value'")
         key_path, _, value_str = item.partition("=")
         key_path = key_path.strip()
 

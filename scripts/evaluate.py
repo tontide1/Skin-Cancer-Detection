@@ -57,6 +57,7 @@ log = logging.getLogger(__name__)
 # Evaluation loop
 # ---------------------------------------------------------------------------
 
+
 @torch.no_grad()
 def evaluate(
     model: torch.nn.Module,
@@ -76,14 +77,14 @@ def evaluate(
 
     for images, masks in tqdm(loader, desc="Evaluating"):
         images = images.to(device)
-        masks  = masks.to(device)
+        masks = masks.to(device)
 
         if use_tta:
-            probs  = tta_predict(model, images)
+            probs = tta_predict(model, images)
             logits = torch.logit(probs.clamp(1e-6, 1 - 1e-6))  # probs → logits for loss
         else:
             logits = model(images)
-            probs  = torch.sigmoid(logits)
+            probs = torch.sigmoid(logits)
 
         loss = criterion(logits, masks)
 
@@ -128,22 +129,30 @@ def evaluate(
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Evaluate segmentation model on test set",
         formatter_class=argparse.RawTextHelpFormatter,
     )
-    parser.add_argument("--config", "-c", required=True,
-                        help="Path to experiment YAML config")
-    parser.add_argument("--checkpoint", "-k", required=True,
-                        help="Path to best_model.pth checkpoint")
-    parser.add_argument("--split", default="test",
-                        choices=["train", "val", "test"],
-                        help="Which split to evaluate on (default: test)")
-    parser.add_argument("--tta", dest="tta", action="store_true", default=True,
-                        help="Use Test-Time Augmentation (default: on)")
-    parser.add_argument("--no-tta", dest="tta", action="store_false",
-                        help="Disable TTA")
+    parser.add_argument("--config", "-c", required=True, help="Path to experiment YAML config")
+    parser.add_argument(
+        "--checkpoint", "-k", required=True, help="Path to best_model.pth checkpoint"
+    )
+    parser.add_argument(
+        "--split",
+        default="test",
+        choices=["train", "val", "test"],
+        help="Which split to evaluate on (default: test)",
+    )
+    parser.add_argument(
+        "--tta",
+        dest="tta",
+        action="store_true",
+        default=True,
+        help="Use Test-Time Augmentation (default: on)",
+    )
+    parser.add_argument("--no-tta", dest="tta", action="store_false", help="Disable TTA")
     parser.add_argument("overrides", nargs="*", metavar="key.subkey=value")
     return parser.parse_args()
 
@@ -156,7 +165,7 @@ def main() -> None:
     if not config.logging.experiment_name:
         config["logging"]["experiment_name"] = Path(args.config).stem
 
-    set_seed(config.seed)
+    set_seed(config.seed, deterministic=bool(getattr(config.training, "deterministic", True)))
     device = get_device()
     log.info(f"Device: {device} | TTA: {args.tta} | Split: {args.split}")
 
@@ -178,7 +187,7 @@ def main() -> None:
 
     # Model
     model = create_model(config).to(device)
-    ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
+    ckpt = torch.load(args.checkpoint, map_location=device, weights_only=True)
     state = ckpt.get("model_state_dict", ckpt)
     load_state_dict_with_aux_compat(model, state, context=str(args.checkpoint))
     log.info(f"Loaded checkpoint: {args.checkpoint}")
