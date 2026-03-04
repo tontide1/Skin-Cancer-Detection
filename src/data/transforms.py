@@ -104,8 +104,14 @@ def get_transforms(split: str, config) -> A.Compose:
             # --- Regularisation ---
             A.CoarseDropout(
                 num_holes_range=(1, 8),
-                hole_height_range=(0.05, 0.1),
-                hole_width_range=(0.05, 0.1),
+                hole_height_range=(
+                    12,
+                    25,
+                ),  # 5–10% of 256px (albumentations >=1.4 requires int pixels)
+                hole_width_range=(
+                    12,
+                    25,
+                ),  # 5–10% of 256px (albumentations >=1.4 requires int pixels)
                 fill=0,
                 fill_mask=0,
                 p=0.2,
