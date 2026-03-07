@@ -1,0 +1,98 @@
+# =============================================================================
+# BASE CONFIG — Default values cho tất cả experiments
+# Experiment configs kế thừa file này qua _base_ và chỉ override những gì thay đổi
+# =============================================================================
+
+seed: 42
+
+# -----------------------------------------------------------------------------
+# Model
+# -----------------------------------------------------------------------------
+model:
+  name: unet                          # "unet" | "sam2" | ...
+  encoder_name: resnet34
+  encoder_weights: imagenet           # "imagenet" | null (train from scratch)
+  decoder_channels: [256, 128, 64, 32, 16]
+  decoder_attention_type: scse        # "scse" | "se" | null
+  in_channels: 3
+  classes: 1
+
+# -----------------------------------------------------------------------------
+# Training
+# -----------------------------------------------------------------------------
+training:
+  batch_size: 64
+  max_epochs: 500
+  optimizer: adamw                    # "adamw" | "adam" | "sgd"
+  lr: 2.0e-4
+  weight_decay: 1.0e-4
+  mixed_precision: true
+  grad_clip: null                     # null | float (max norm)
+  deterministic: true                 # true = cuDNN deterministic + benchmark=False (reproducible)
+                                      # false = cuDNN benchmark=True (faster, non-deterministic)
+
+  # Differential learning rate (encoder trains slower than decoder)
+  # Requires model to expose a .encoder attribute (SMP models) or .model attribute (DeepLabV3Wrapper)
+  differential_lr:
+    enabled: false                    # set true to enable encoder/decoder split LR
+    encoder_lr_scale: 0.1             # encoder_lr = lr * encoder_lr_scale
+
+  loss:
+    focal_weight: 0.5
+    dice_weight: 0.5
+    focal_gamma: 2.0
+    focal_alpha: null                 # null = không weight class
+
+# -----------------------------------------------------------------------------
+# LR Scheduler  — monitor PHẢI nhất quán với early stopping
+# -----------------------------------------------------------------------------
+lr_schedule:
+  scheduler: reduce_on_plateau
+  monitor: val_dice                   # FIX: thống nhất với early_stopping
+  mode: max
+  factor: 0.5
+  patience: 5
+  min_lr: 1.0e-7
+  warmup_epochs: 0                   # 0 = no warmup
+  warmup_start_lr: 1.0e-6            # LR at epoch 0 when warmup > 0
+
+# -----------------------------------------------------------------------------
+# Early Stopping
+# -----------------------------------------------------------------------------
+early_stopping:
+  patience: 10
+  min_delta: 1.0e-4
+  monitor: val_dice
+  mode: max
+
+# -----------------------------------------------------------------------------
+# Data
+# Trên local sau khi chạy prepare_data.py:  data.root = data/processed
+# Trên Kaggle override qua CLI:             data.root = /kaggle/input/isic-2018-task-1-segmentation
+# -----------------------------------------------------------------------------
+data:
+  root: data/processed
+  input_size: [256, 256]
+  num_workers: 2
+  pin_memory: true
+  persistent_workers: true
+  val_batch_size_multiplier: 2        # val loader batch_size = training.batch_size * this value
+                                      # val has no gradient storage → can fit 2x safely
+
+# -----------------------------------------------------------------------------
+# Logging — W&B
+# Nếu không dùng W&B: logging.use_wandb = false
+# -----------------------------------------------------------------------------
+logging:
+  use_wandb: true
+  project: skin-cancer-segmentation
+  entity: null                        # null = dùng default W&B account
+  experiment_name: null               # null = tự động lấy tên file config
+
+# -----------------------------------------------------------------------------
+# Output
+# Trên local:  output.dir = outputs
+# Trên Kaggle: output.dir = /kaggle/working  (override qua CLI)
+# -----------------------------------------------------------------------------
+output:
+  dir: outputs

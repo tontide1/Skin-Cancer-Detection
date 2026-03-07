@@ -1,0 +1,309 @@
+# 🔬 Comprehensive Code Review — Skin-Cancer-Detection
+
+> **Reviewed**: All source code, scripts, configs, and tests
+> **Date**: 2026-03-04
+> **Perspectives**: Computer Vision • Data Science • ML Engineering • Python Patterns • Python Pro
+
+---
+
+## 📊 Project Overview
+
+| Aspect | Details |
+|--------|---------|
+| **Task** | Binary skin lesion segmentation (ISIC 2018 Task 1) |
+| **Models** | U-Net (SMP) + DeepLabV3 (torchvision MobileNetV3-Large) |
+| **Loss** | Focal + Soft Dice (weighted combination) |
+| **Metrics** | Dice Coefficient, IoU (macro-averaged) |
+| **Training** | Mixed precision, warmup LR, DDP, resume support |
+| **Inference** | TTA (hflip + vflip), threshold optimization |
+| **Test Coverage** | 10 test files covering config, dataset, losses, metrics, trainer, distributed, evaluate |
+
+---
+
+## ✅ Strengths (What's Done Well)
+
+### 🏗️ Architecture & Design
+- **Clean separation of concerns**: `src/data/`, `src/models/`, `src/losses/`, `src/metrics/`, `src/training/`, `src/inference/`, `src/utils/` — textbook modular layout
+- **Factory pattern** in [segmentation.py](file:///home/tontide1/coding/CV_project/Skin-Cancer-Detection/src/models/segmentation.py) with `_REGISTRY` makes adding new models straightforward
+- **Config inheritance** (`_base_` + YAML merging) — excellent for experiment management with minimal repetition
+- **CLI override system** with strict key validation prevents silent typos — very robust
+
+### 🧠 ML Engineering
+- **Differential learning rate** for encoder vs decoder — important for transfer learning
+- **Warmup + ReduceOnPlateau/Cosine schedulers** — production-grade LR strategy
+- **Resume-safe training**: saves `last_checkpoint.pth` every epoch with full optimizer/scaler/scheduler state
+- **Best model tracking** with `ModelCheckpoint` + `EarlyStopping` — clean callback design
+- **Checkpoint compatibility** via `load_state_dict_with_aux_compat` handles legacy aux head migration gracefully
+
+### 🐍 Python Quality
+- **`from __future__ import annotations`** consistently across all files — forward-compatible type hints
+- **Type hints** on all public functions with proper return types
+- **Comprehensive docstrings** with Args/Returns/Raises sections
+- **`set_to_none=True`** in `optimizer.zero_grad()` — correct PyTorch 2.x best practice
+- **Proper `GradScaler` API** using `torch.amp.GradScaler(device.type, ...)` — modern API usage
+
+### 🔬 Computer Vision
+- **Well-balanced augmentation pipeline**: spatial (flip, rotate, affine, elastic) + colour (brightness, HSV, blur, noise) + regularisation (CoarseDropout)
+- **Resize before augmentation** — correct ordering
+- **ImageNet normalization** applied consistently
+- **TTA with geometric transforms** (hflip + vflip) — simple but effective
+- **Threshold optimization** in evaluate.py searching [0.3, 0.7] — important for binary segmentation
+
+### 🧪 Testing
+- Good test coverage: config parsing, dataset pairing, losses (scalar/gradient/weighting), metrics (boundary cases), trainer resume, distributed context
+- **Reference evaluation test** (`test_evaluate_streaming.py`) — excellent idea verifying streaming vs batch computation
+
+---
+
+## ⚠️ Issues & Recommendations
+
+### 🔴 Critical Issues
+
+#### 1. `predict.py` uses `weights_only=False` — **Security Risk**
+
+```python
+# scripts/predict.py line 197
+ckpt = torch.load(args.checkpoint, map_location=device, weights_only=False)
+```
+
+`weights_only=False` allows arbitrary code execution via pickle. This is `True` in `evaluate.py` and `trainer.py` but **`False`** here — likely oversight.
+
+> [!CAUTION]
+> Change to `weights_only=True` to match the rest of the codebase and prevent untrusted checkpoint attacks.
+
+---
+
+#### 2. Evaluate `dice_coefficient` is per-batch not per-dataset — **Metric Mismatch**
+
+In [evaluate.py](file:///home/tontide1/coding/CV_project/Skin-Cancer-Detection/scripts/evaluate.py), the streaming threshold search computes Dice/IoU per-sample correctly. But the `dice_coefficient()` in [metrics/segmentation.py](file:///home/tontide1/coding/CV_project/Skin-Cancer-Detection/src/metrics/segmentation.py) returns `dice.mean().item()` — this is **per-batch macro average**, not accumulating across batches. The trainer averages these batch-averaged values weighted by batch size:
+
+```python
+total_dice += d * n  # d is per-batch-mean, n is batch size
+```
+
+This is **mathematically correct** for equal batch sizes but subtly wrong for the **last incomplete batch** (which has fewer samples). Since `drop_last=True` for training, this is fine for train, but **validation doesn't drop last** → the final smaller batch gets under-weighted.
+
+> [!WARNING]
+> For validation, consider accumulating per-sample metrics rather than per-batch means. The error is very small in practice but is technically incorrect.
+
+---
+
+### 🟡 Important Recommendations
+
+#### 3. `Config.__getattr__` creates new `Config` on every access
+
+```python
+def __getattr__(self, key: str) -> Any:
+    val = self[key]
+    return Config(val) if isinstance(val, dict) else val
+```
+
+Every dot-access to nested dicts creates a **new `Config()` instance**. This means:
+- `config.model is config.model` → `False`
+- Mutation via `config.model.name = "x"` does **NOT** modify the parent — the write goes to a throwaway copy
+
+This is a **silent data loss bug** if anyone tries `config.model.name = "new_value"`. Currently the codebase only reads configs so it doesn't trigger, but it's a latent trap.
+
+> [!IMPORTANT]
+> Consider wrapping upon `__init__` so nested dicts are converted to `Config` once, or document that `Config` is read-only.
+
+---
+
+#### 4. `set_seed()` disables cuDNN benchmark — **Training Slowdown**
+
+```python
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+```
+
+Setting `benchmark = False` forces cuDNN to not auto-tune kernel selection, which can cause **10–30% training slowdown** on convolution-heavy models. For a segmentation project this matters significantly.
+
+> [!TIP]
+> Consider making deterministic mode configurable (e.g. `config.deterministic: true/false`). For production training, keep `benchmark=True` and `deterministic=False` — use seeds for data loading reproducibility only.
+
+---
+
+#### 5. DeepLabV3 builder is hardcoded to MobileNetV3-Large only
+
+[_build_deeplabv3](file:///home/tontide1/coding/CV_project/Skin-Cancer-Detection/src/models/segmentation.py#L56-L119) always builds `deeplabv3_mobilenet_v3_large` regardless of `encoder_name`. If you want other backbones (ResNet50/101), you'd need a new builder. The `encoder_name` field in config is purely informational.
+
+> [!NOTE]
+> This is documented and fine for now, but consider:
+> - A `deeplabv3_resnet50`/`deeplabv3_resnet101` builder for comparison
+> - Or use SMP's `DeepLabV3Plus` which supports all SMP encoders
+
+---
+
+#### 6. No data normalization statistics from the actual dataset
+
+The augmentation pipeline uses hardcoded ImageNet means/stds:
+```python
+_IMAGENET_MEAN = (0.485, 0.456, 0.406)
+_IMAGENET_STD  = (0.229, 0.224, 0.225)
+```
+
+Dermoscopy images have significantly different color distributions from ImageNet. When using **non-pretrained** weights (`encoder_weights: null`), this hurts.
+
+> [!TIP]
+> Compute ISIC dataset-specific statistics and allow config-based switching. When using ImageNet-pretrained backbones, ImageNet stats are correct.
+
+---
+
+#### 7. No learning rate stored per-epoch in training curves history
+
+Looking at the `_save_last_checkpoint` and `fit()` methods — the LR is logged per epoch, but if training is **resumed**, the history list starts fresh (from `_NoOpLogger` or new `Logger`). The training curves will only show post-resume epochs.
+
+> [!WARNING]
+> Consider saving/loading `Logger.history` alongside the checkpoints so training curves show the full run after resume.
+
+---
+
+### 🟢 Minor Suggestions
+
+#### 8. Inconsistent `weights_only` in `predict.py` vs `evaluate.py`
+
+| Script | `weights_only` |
+|--------|---------------|
+| `train.py` (trainer) | `True` |
+| `evaluate.py` | `True` |
+| `predict.py` | **`False`** |
+
+Should be unified to `True`.
+
+---
+
+#### 9. Missing `__init__.py` content for public API
+
+All `__init__.py` files import from submodules (checked: `src/losses/__init__.py`, `src/metrics/__init__.py`), which is good. But the root `src/__init__.py` is empty — consider exposing the public API:
+
+```python
+from src.models.segmentation import create_model
+from src.data.dataset import ISICDataset
+```
+
+---
+
+#### 10. `conftest.py` sys.path manipulation
+
+Both `conftest.py` and all `scripts/*.py` files manually manipulate `sys.path`. Since `pyproject.toml` already defines `setuptools.packages.find`, using `pip install -e .` would eliminate all sys.path hacks.
+
+---
+
+#### 11. YAML comments are in mixed Vietnamese/English
+
+Not a code issue, but for maintainability, consider standardizing on one language for code comments. Docstrings are in English which is good, but inline comments and error messages switch between Vietnamese and English.
+
+---
+
+#### 12. `CoarseDropout` fill_mask=0 on segmentation masks
+
+```python
+A.CoarseDropout(
+    fill=0,
+    fill_mask=0,  # sets dropped mask pixels to 0
+    p=0.2,
+)
+```
+
+Setting `fill_mask=0` means dropped regions are treated as **background** in the mask. This could teach the model that "black patches = no lesion", which is correct augmentation behavior for cutout regularization.
+
+---
+
+#### 13. TTA could include 90° rotations
+
+Current TTA only uses horizontal and vertical flips. Adding 90°/270° rotations would give 4 more views for small cost:
+
+```python
+# Current: 3 views (original + hflip + vflip)
+# Recommended: 8 views (+ rot90/180/270 + their flips)
+```
+
+---
+
+#### 14. Validation batch size same as training
+
+```python
+val_loader = DataLoader(
+    val_ds,
+    batch_size=config.training.batch_size,  # same as train
+```
+
+Validation can safely use **2x training batch size** (no gradients stored), improving GPU utilization during eval.
+
+> [!TIP]
+> Add `config.data.val_batch_size` or auto-compute as `2 * training.batch_size`.
+
+---
+
+## 📁 Architecture Diagram
+
+```mermaid
+graph TB
+    subgraph Scripts
+        A[train.py] --> B[Trainer]
+        C[evaluate.py] --> D[evaluate fn]
+        E[predict.py] --> F[predict_single fn]
+        G[prepare_data.py]
+    end
+
+    subgraph "src/training"
+        B --> H[EarlyStopping]
+        B --> I[ModelCheckpoint]
+        B --> J[DistributedContext]
+    end
+
+    subgraph "src/models"
+        K[create_model] --> L[_build_unet / SMP]
+        K --> M["_build_deeplabv3 / torchvision"]
+        M --> N[DeepLabV3Wrapper]
+    end
+
+    subgraph "src/data"
+        O[ISICDataset]
+        P[get_transforms]
+    end
+
+    subgraph "src/losses"
+        Q[CombinedLoss]
+        Q --> R[FocalLoss]
+        Q --> S[SoftDiceLoss]
+    end
+
+    subgraph "src/metrics"
+        T[dice_coefficient]
+        U[iou_score]
+    end
+
+    subgraph "src/utils"
+        V[Config / load_config]
+        W[Logger / W&B]
+        X[checkpoint compat]
+        Y[misc / seeds / plots]
+    end
+
+    A --> K
+    A --> O
+    A --> P
+    B --> Q
+    B --> T
+    B --> U
+    D --> T
+    D --> U
+    F --> Z[tta_predict]
+```
+
+---
+
+## 📋 Summary Scorecard
+
+| Category | Score | Notes |
+|----------|-------|-------|
+| **Architecture** | 🟢 9/10 | Clean modular design, factory pattern, config inheritance |
+| **ML Best Practices** | 🟢 8/10 | Differential LR, warmup, resume, TTA, threshold search |
+| **Code Quality** | 🟢 8/10 | Type hints, docstrings, consistent style |
+| **Testing** | 🟡 7/10 | Good unit tests, missing transform/predict/TTA tests |
+| **CV Correctness** | 🟢 8/10 | Good augmentations, proper normalization, solid loss design |
+| **Production Readiness** | 🟡 7/10 | `weights_only=False` gap, no dataset stats, missing val batch config |
+| **Documentation** | 🟡 7/10 | Good docstrings, mixed-language comments |
+
+**Overall: 🟢 Solid project — production-grade foundation with minor polish needed.**

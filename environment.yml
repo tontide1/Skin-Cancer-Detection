@@ -1,0 +1,41 @@
+# Skin Cancer Detection — Conda environment
+# Usage:
+#   conda env create -f environment.yml
+#   conda activate skin-cancer
+#
+# After creation, install the local src package:
+#   pip install -e .
+
+name: CV
+
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+
+dependencies:
+  - python=3.11
+  - pip
+
+  # PyTorch (CUDA 12.1 — adjust cuda version as needed)
+  - pytorch>=2.1
+  - torchvision
+  - pytorch-cuda=12.1
+
+  # Data / viz
+  - numpy
+  - pandas
+  - pillow
+  - matplotlib
+  - scikit-learn
+  - tqdm
+  - pyyaml
+  - jupyter
+  - ipykernel
+
+  - pip:
+    - segmentation-models-pytorch>=0.3
+    - albumentations>=1.3
+    - wandb
+    - -e .    # install src/ as editable package

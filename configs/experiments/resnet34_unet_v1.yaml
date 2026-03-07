@@ -1,0 +1,10 @@
+# =============================================================================
+# Experiment: resnet34_unet_v1
+# Reproduce kết quả final_resnet34_unet: Test Dice=0.9021, Test IoU=0.8368
+# Best epoch: 41 | Val Dice: 0.8972
+# =============================================================================
+
+_base_: ../base.yaml
+
+logging:
+  experiment_name: resnet34_unet_v1
