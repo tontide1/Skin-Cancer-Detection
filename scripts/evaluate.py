@@ -127,6 +127,7 @@ def evaluate(
         f"{split_prefix}_dice": mean_dice[idx_05],
         f"{split_prefix}_iou": mean_iou[idx_05],
         f"{split_prefix}_dice_best": mean_dice[best_idx],
+        f"{split_prefix}_iou_best": mean_iou[best_idx],
     }
 
 
@@ -212,7 +213,7 @@ def main() -> None:
     print(f"  {args.split}_iou  @ thr=0.50:  {results[f'{args.split}_iou']:.4f}")
     print(f"  Best threshold:          {results['best_threshold']:.2f}")
     print(f"  {args.split}_dice_best:       {results[f'{args.split}_dice_best']:.4f}")
-    print(f"  IoU   @ best thr:        {results['best_iou_at_best_thr']:.4f}")
+    print(f"  {args.split}_iou_best @ best thr: {results[f'{args.split}_iou_best']:.4f}")
     print(f"  TTA:                     {args.tta}")
     print("=" * 60)
 
