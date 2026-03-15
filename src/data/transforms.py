@@ -18,6 +18,7 @@ _IMAGENET_MEAN = (0.485, 0.456, 0.406)
 _IMAGENET_STD = (0.229, 0.224, 0.225)
 
 # Recognised split aliases that receive zero augmentation
+_TRAIN_SPLITS = {"train"}
 _VAL_SPLITS = {"val", "valid", "validation", "test", "predict"}
 
 
@@ -29,8 +30,7 @@ def get_transforms(split: str, config) -> A.Compose:
         split:  One of ``"train"``, ``"val"``, ``"test"``, ``"predict"``, etc.
                 Values present in ``_VAL_SPLITS`` receive the val/test pipeline
                 (resize + normalise only, zero augmentation).
-                Unrecognised splits fall through to the training pipeline —
-                pass ``"train"`` explicitly to get full augmentation.
+                ``"train"`` receives the augmentation pipeline.
         config: Project config object (``src.utils.config.Config``).
                 Must expose ``config.data.input_size`` as a sequence ``[H, W]``.
 
@@ -42,6 +42,7 @@ def get_transforms(split: str, config) -> A.Compose:
 
     Raises:
         TypeError: If ``config.data.input_size`` is not a list/tuple of two ints.
+        ValueError: If ``split`` is not a recognised alias.
     """
     input_size = config.data.input_size
     if len(input_size) != 2:
@@ -58,6 +59,12 @@ def get_transforms(split: str, config) -> A.Compose:
     ]
 
     normalized_split = split.lower()
+    allowed_splits = sorted(_TRAIN_SPLITS | _VAL_SPLITS)
+
+    if normalized_split not in _TRAIN_SPLITS and normalized_split not in _VAL_SPLITS:
+        raise ValueError(
+            f"Unknown split '{split}'. Allowed values: {allowed_splits}"
+        )
 
     # ------------------------------------------------------------------
     # Validation / test — no augmentation
