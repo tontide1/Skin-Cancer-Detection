@@ -64,6 +64,7 @@ def evaluate(
     loader: DataLoader,
     device: torch.device,
     criterion: CombinedLoss,
+    split: str = "test",
     threshold: float = 0.5,
     use_tta: bool = True,
 ) -> dict:
@@ -114,6 +115,7 @@ def evaluate(
     mean_iou = [s / total_samples for s in iou_sums]
     idx_05 = min(range(len(thresholds)), key=lambda i: abs(thresholds[i] - threshold))
     best_idx = max(range(len(thresholds)), key=lambda i: mean_dice[i])
+    split_prefix = split.lower()
 
     return {
         "loss": total_loss / total_samples,
@@ -122,6 +124,9 @@ def evaluate(
         "best_threshold": thresholds[best_idx],
         "best_dice_at_best_thr": mean_dice[best_idx],
         "best_iou_at_best_thr": mean_iou[best_idx],
+        f"{split_prefix}_dice": mean_dice[idx_05],
+        f"{split_prefix}_iou": mean_iou[idx_05],
+        f"{split_prefix}_dice_best": mean_dice[best_idx],
     }
 
 
@@ -196,17 +201,17 @@ def main() -> None:
     criterion = CombinedLoss(config)
 
     # Evaluate
-    results = evaluate(model, loader, device, criterion, use_tta=args.tta)
+    results = evaluate(model, loader, device, criterion, split=args.split, use_tta=args.tta)
 
     # Print
     print("\n" + "=" * 60)
     print(f"  EVALUATION RESULTS ({args.split.upper()} SET)")
     print("=" * 60)
     print(f"  Loss:                    {results['loss']:.4f}")
-    print(f"  Dice  @ thr=0.50:        {results['dice']:.4f}")
-    print(f"  IoU   @ thr=0.50:        {results['iou']:.4f}")
+    print(f"  {args.split}_dice @ thr=0.50:  {results[f'{args.split}_dice']:.4f}")
+    print(f"  {args.split}_iou  @ thr=0.50:  {results[f'{args.split}_iou']:.4f}")
     print(f"  Best threshold:          {results['best_threshold']:.2f}")
-    print(f"  Dice  @ best thr:        {results['best_dice_at_best_thr']:.4f}")
+    print(f"  {args.split}_dice_best:       {results[f'{args.split}_dice_best']:.4f}")
     print(f"  IoU   @ best thr:        {results['best_iou_at_best_thr']:.4f}")
     print(f"  TTA:                     {args.tta}")
     print("=" * 60)
