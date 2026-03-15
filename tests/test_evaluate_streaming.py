@@ -67,6 +67,7 @@ def test_evaluate_streaming_matches_reference_no_tta() -> None:
         loader=loader,
         device=torch.device("cpu"),
         criterion=criterion,  # type: ignore[arg-type]
+        split="test",
         threshold=0.5,
         use_tta=False,
     )
@@ -82,3 +83,33 @@ def test_evaluate_streaming_matches_reference_no_tta() -> None:
     assert streaming["best_iou_at_best_thr"] == pytest.approx(
         reference["best_iou_at_best_thr"], abs=1e-7
     )
+    assert streaming["test_dice"] == pytest.approx(reference["dice"], abs=1e-7)
+    assert streaming["test_iou"] == pytest.approx(reference["iou"], abs=1e-7)
+    assert streaming["test_dice_best"] == pytest.approx(
+        reference["best_dice_at_best_thr"], abs=1e-7
+    )
+
+
+def test_evaluate_uses_split_specific_prefix_keys() -> None:
+    torch.manual_seed(11)
+    images = torch.randn(4, 1, 8, 8)
+    masks = torch.randint(0, 2, (4, 1, 8, 8)).float()
+    loader = DataLoader(TensorDataset(images, masks), batch_size=2, shuffle=False)
+    model = _IdentityLogitModel()
+    criterion = torch.nn.BCEWithLogitsLoss()
+
+    results = evaluate(
+        model=model,
+        loader=loader,
+        device=torch.device("cpu"),
+        criterion=criterion,  # type: ignore[arg-type]
+        split="val",
+        use_tta=False,
+    )
+
+    assert "val_dice" in results
+    assert "val_iou" in results
+    assert "val_dice_best" in results
+    assert "test_dice" not in results
+    assert results["val_dice"] == pytest.approx(results["dice"], abs=1e-7)
+    assert results["val_dice_best"] == pytest.approx(results["best_dice_at_best_thr"], abs=1e-7)
