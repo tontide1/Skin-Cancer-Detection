@@ -109,7 +109,11 @@ class Logger:
 
         # CSV
         csv_path = self.output_dir / "training_history.csv"
-        fieldnames = list(self.history[0].keys())
+        fieldnames: list[str] = []
+        for row in self.history:
+            for key in row.keys():
+                if key not in fieldnames:
+                    fieldnames.append(key)
         with open(csv_path, "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
