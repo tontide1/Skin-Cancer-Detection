@@ -1,0 +1,16 @@
+# =============================================================================
+# Experiment: resnet34_unet_kaggle_t4
+# Target: Kaggle 2x T4 — balance speed and quality
+# =============================================================================
+
+_base_: ../base.yaml
+
+logging:
+  experiment_name: resnet34_unet_kaggle_t4
+
+training:
+  batch_size: 32
+  deterministic: false
+
+data:
+  num_workers: 4
