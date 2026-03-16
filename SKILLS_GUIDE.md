@@ -35,15 +35,15 @@
 
 | Skill | Vai trò | When to Use in This Project | Tools |
 | :--- | :--- | :--- | :--- |
-| `computer-vision-expert` | SOTA CV: SAM 3, segmentation, VLMs, deployment | Bất kỳ task nào liên quan đến model architecture, augmentation, segmentation pipeline | OpenCode · Cursor · Antigravity |
-| `ml-engineer` | PyTorch 2.x production, model serving, distributed training | Training loop, AMP, DataLoader optimization, ONNX export, inference | OpenCode · Cursor · Antigravity |
-| `mlops-engineer` | W&B, experiment tracking, ML pipelines, CI/CD | W&B setup/sweeps, experiment YAML management, model registry, CI/CD | OpenCode · Cursor · Antigravity |
-| `data-scientist` | Statistical analysis, EDA, model comparison | Ablation study, Dice/IoU analysis, visualization, threshold search | OpenCode · Cursor · Antigravity |
-| `python-pro` | Python 3.11+, async, modern tooling (uv, ruff) | Test suite, type hints, docstrings, linter setup, editable install | OpenCode · Cursor · Antigravity |
-| `python-patterns` | Architecture decisions, framework selection, code structure | Project structure, `src/` package design, FastAPI structure khi cần | OpenCode · Cursor · Antigravity |
-| `docker-expert` | Multi-stage builds, security, Compose | Dockerize training pipeline, inference container, FastAPI container | OpenCode · Cursor · Antigravity |
-| `debugging-strategies` | Systematic debugging, root cause analysis, profiling | NaN loss, GPU OOM, DataLoader deadlock, val Dice không tăng | OpenCode · Cursor · Antigravity |
-| `architecture` | System design, ADRs, trade-off analysis | Thiết kế FastAPI web app, model serving layer, ONNX serving | OpenCode · Cursor · Antigravity |
+| `computer-vision-expert` | SOTA CV: SAM 3, segmentation, VLMs | Model architecture, augmentation, segmentation pipeline | OpenCode · Codex · Antigravity |
+| `ml-engineer` | PyTorch 2.x production, model serving | Training loop, AMP, DataLoader, inference | OpenCode · Codex · Antigravity |
+| `ml-pipeline-workflow` | ML pipeline từ data → deployment | End-to-end ML workflow, feature engineering, model validation | OpenCode · Codex · Antigravity |
+| `python-pro` | Python 3.11+, modern tooling | Type hints, docstrings, project setup | OpenCode · Codex · Antigravity |
+| `python-testing-patterns` | Pytest patterns, test coverage | Test suite, unit tests, integration tests | OpenCode · Codex · Antigravity |
+| `python-performance-optimization` | Performance profiling, optimization | GPU optimization, memory optimization, profiling | OpenCode · Codex · Antigravity |
+| `systematic-debugging` | Systematic debugging, root cause | NaN loss, GPU OOM, training issues | OpenCode · Codex · Antigravity |
+| `error-debugging-error-analysis` | Error analysis, diagnostics | Error trace analysis, exception handling | OpenCode · Codex · Antigravity |
+| `debugging-toolkit-smart-debug` | Smart debugging tools | Interactive debugging, breakpoint strategies | OpenCode · Codex · Antigravity |
 
 ---
 
@@ -57,7 +57,16 @@
 # Trong OpenCode chat session:
 "Use @computer-vision-expert to implement ISICDataset in src/data/dataset.py"
 "Use @ml-engineer to optimize the DataLoader in scripts/train.py"
-"Use @debugging-strategies to diagnose why val_dice is not improving after epoch 20"
+"Use @systematic-debugging to diagnose why val_dice is not improving after epoch 20"
+```
+
+### Codex CLI
+
+```bash
+# Trong Codex CLI:
+"Use computer-vision-expert to implement ISICDataset in src/data/dataset.py"
+"Use ml-engineer to optimize the DataLoader in scripts/train.py"
+"Use systematic-debugging to diagnose why val_dice is not improving after epoch 20"
 ```
 
 ### Cursor
@@ -66,7 +75,7 @@
 # Trong Cursor Chat (CMD+L hoặc CTRL+L), tag skill ở đầu prompt:
 @computer-vision-expert implement get_transforms() with Albumentations for ISIC 2018
 @ml-engineer add EfficientNet-B4 encoder to the model registry in src/models/segmentation.py
-@data-scientist create an ablation study comparison table for resnet34 vs efficientnet-b4
+@python-performance-optimization create an ablation study comparison table for resnet34 vs efficientnet-b4
 ```
 
 ### Antigravity (Agent Mode)
@@ -74,8 +83,8 @@
 ```
 # Trong Antigravity Agent Mode:
 "Use computer-vision-expert skill to design a SegFormer-based architecture for binary segmentation"
-"Use mlops-engineer skill to set up W&B sweeps for hyperparameter search"
-"Use docker-expert skill to write a multi-stage Dockerfile for the training pipeline"
+"Use ml-pipeline-workflow skill to set up W&B sweeps for hyperparameter search"
+"Use systematic-debugging skill to diagnose training issues"
 ```
 
 ---
@@ -326,13 +335,13 @@ Expected output:
 
 #### Task 7 — Tối ưu DataLoader
 
-- **Skill chính:** `ml-engineer`
-- **Skill hỗ trợ:** `python-patterns`
+- **Skill chính:** `python-performance-optimization`
+- **Skill hỗ trợ:** `ml-engineer`
 
 **Prompt mẫu:**
 
 ```
-Use @ml-engineer to optimize DataLoader configuration for ISIC 2018 training.
+Use @python-performance-optimization to optimize DataLoader configuration for ISIC 2018 training.
 
 Relevant files:
 - scripts/train.py build_dataloaders() function
@@ -353,8 +362,8 @@ Expected output: Optimized build_dataloaders() + updated base.yaml data section 
 
 #### Task 8 — Tối ưu AMP / mixed precision
 
-- **Skill chính:** `ml-engineer`
-- **Skill hỗ trợ:** `debugging-strategies`
+- **Skill chính:** `python-performance-optimization`
+- **Skill hỗ trợ:** `ml-engineer`, `systematic-debugging`
 
 **Prompt mẫu:**
 
@@ -411,13 +420,13 @@ Expected output:
 
 #### Task 10 — W&B Sweeps (Hyperparameter Search)
 
-- **Skill chính:** `mlops-engineer`
-- **Skill hỗ trợ:** `data-scientist`
+- **Skill chính:** `ml-pipeline-workflow`
+- **Skill hỗ trợ:** `python-pro`
 
 **Prompt mẫu:**
 
 ```
-Use @mlops-engineer to set up W&B sweeps for hyperparameter search on this project.
+Use @ml-pipeline-workflow to set up W&B sweeps for hyperparameter search on this project.
 
 Relevant files:
 - configs/base.yaml (all hyperparameters)
@@ -446,13 +455,13 @@ Expected output:
 
 #### Task 11 — Ablation Study so sánh architectures
 
-- **Skill chính:** `data-scientist`
-- **Skill hỗ trợ:** `mlops-engineer`
+- **Skill chính:** `python-performance-optimization`
+- **Skill hỗ trợ:** `ml-engineer`
 
 **Prompt mẫu:**
 
 ```
-Use @data-scientist to create an ablation study analysis for comparing segmentation architectures.
+Use @python-performance-optimization to create an ablation study analysis for comparing segmentation architectures.
 
 Context: We have (or will have) evaluation results for:
 - resnet34_unet (baseline): Test Dice=0.9021, IoU=0.8368
@@ -477,13 +486,13 @@ Expected output: Complete scripts/ablation_study.py
 
 #### Task 12 — Phân tích training curves + diagnose overfitting
 
-- **Skill chính:** `data-scientist`
-- **Skill hỗ trợ:** `debugging-strategies`
+- **Skill chính:** `error-debugging-error-analysis`
+- **Skill hỗ trợ:** `systematic-debugging`
 
 **Prompt mẫu:**
 
 ```
-Use @data-scientist to analyze training curves and diagnose potential issues.
+Use @error-debugging-error-analysis to analyze training curves and diagnose potential issues.
 
 Relevant files:
 - outputs/<experiment_name>/training_history.json (fields: epoch, train_loss, val_loss, train_dice, val_dice, lr)
@@ -507,13 +516,13 @@ Expected output:
 
 #### Task 13 — Debug NaN loss / GPU OOM
 
-- **Skill chính:** `debugging-strategies`
-- **Skill hỗ trợ:** `ml-engineer`
+- **Skill chính:** `systematic-debugging`
+- **Skill hỗ trợ:** `ml-engineer`, `python-performance-optimization`
 
 **Prompt mẫu:**
 
 ```
-Use @debugging-strategies to systematically debug [NaN loss / GPU OOM] in the training pipeline.
+Use @systematic-debugging to systematically debug [NaN loss / GPU OOM] in the training pipeline.
 
 Relevant files:
 - src/training/trainer.py train_one_epoch()
@@ -537,30 +546,36 @@ Expected output:
 
 #### Task 14 — Debug: Val Dice không tăng
 
-- **Skill chính:** `debugging-strategies`
-- **Skill hỗ trợ:** `data-scientist`
+- **Skill chính:** `systematic-debugging`
+- **Skill hỗ trợ:** `error-debugging-error-analysis`, `debugging-toolkit-smart-debug`
 
 **Prompt mẫu:**
 
 ```
-Use @debugging-strategies to diagnose why validation Dice is plateauing / not improving.
+Use @systematic-debugging to diagnose why validation Dice is plateauing / not improving.
 
 Relevant files:
 - src/training/trainer.py validate()
-- src/metrics/segmentation.py dice_coefficient()
-- src/data/transforms.py (verify val transforms have zero augmentation)
-- configs/base.yaml (early_stopping, lr_schedule sections)
+- src/data/dataset.py ISICDataset
+- configs/base.yaml (training section)
 
-Observed symptom: val_dice plateaus at ~0.85 after epoch 15, train_dice continues to ~0.93
+Context: Training runs for 50 epochs but val_dice stays around 0.85-0.87 while train_dice reaches 0.95+.
+Questions to explore:
+1. Is data leakage happening (val set too easy)?
+2. Is augmentation too aggressive on training?
+3. Is the learning rate too high/low for the later epochs?
 
-Constraints:
-- Check these hypotheses in order:
-  1. Data leakage (augmentation applied to val set?)
-  2. Metric computation bug (threshold issue?)
-  3. LR too high / ReduceLROnPlateau not triggering?
-  4. Batch normalization behavior (model.eval() called correctly?)
+Expected output:
+1. Diagnostic checklist specific to validation plateau
+2. 3-5 hypotheses ranked by likelihood
+3. Suggested experiments to differentiate between hypotheses
+```
 
-Expected output: Ordered checklist with code snippets for each verification step.
+**Additional Tools for Debugging:**
+
+- **Error Analysis:** Use `error-debugging-error-analysis` for deep error trace analysis and exception handling patterns
+- **Smart Debugging:** Use `debugging-toolkit-smart-debug` for interactive debugging strategies and breakpoint placement
+
 ```
 
 ---
@@ -569,13 +584,13 @@ Expected output: Ordered checklist with code snippets for each verification step
 
 #### Task 15 — Tạo test suite pytest cho `src/`
 
-- **Skill chính:** `python-pro`
-- **Skill hỗ trợ:** `python-patterns`
+- **Skill chính:** `python-testing-patterns`
+- **Skill hỗ trợ:** `python-pro`
 
 **Prompt mẫu:**
 
 ```
-Use @python-pro to create a pytest test suite for the src/ package.
+Use @python-testing-patterns to create a pytest test suite for the src/ package.
 
 Relevant files:
 - src/losses/segmentation.py (FocalLoss, SoftDiceLoss, CombinedLoss)
@@ -811,15 +826,15 @@ Step 2 — Verify Training Loop  → @ml-engineer
            src/training/trainer.py. Check: output shape (B,1,H,W), AMP compatibility,
            parameter count with count_parameters()."
 
-Step 3 — Experiment Config  → @mlops-engineer
+Step 3 — Experiment Config  → @ml-pipeline-workflow
   Task: Create W&B experiment config, run naming convention
-  Prompt: "Use @mlops-engineer to set up W&B config for experiment [name].
+  Prompt: "Use @ml-pipeline-workflow to set up W&B config for experiment [name].
            Relevant files: src/utils/logger.py, configs/experiments/[new_config].yaml.
            Ensure experiment_name, tags, and config logging are correct."
 
-Step 4 — Evaluate & Compare  → @data-scientist
+Step 4 — Evaluate & Compare  → @python-performance-optimization
   Task: Run ablation_study.py, create comparison report
-  Prompt: "Use @data-scientist to compare [new_architecture] vs resnet34_unet baseline.
+  Prompt: "Use @python-performance-optimization to compare [new_architecture] vs resnet34_unet baseline.
            Input: outputs/[new_exp]/eval_test_results.json vs outputs/resnet34_unet_v1/eval_test_results.json.
            Report: dice@0.5, iou@0.5, dice@best_thr, inference time, #params. Include statistical note."
 ```
@@ -831,7 +846,7 @@ Step 4 — Evaluate & Compare  → @data-scientist
 > **Mục tiêu:** Xác định và fix nguyên nhân model không học được.
 
 ```
-Step 1 — Identify Problem Type  → @debugging-strategies
+Step 1 — Identify Problem Type  → @systematic-debugging
   Task: Phân loại vấn đề (data bug vs loss bug vs optimizer bug vs architecture bug)
   Prompt: Task 13 hoặc Task 14 tùy triệu chứng (xem Section 4.5)
 
@@ -841,13 +856,17 @@ Step 2 — Technical Fix  → @ml-engineer
            Relevant files: [files from debugging output].
            Constraint: fix must not break Kaggle compatibility."
 
-Step 3 — Validate Fix  → @data-scientist
+Step 3 — Validate Fix  → @python-performance-optimization
   Task: Xác nhận fix hoạt động bằng metrics analysis
-  Prompt: "Use @data-scientist to compare training curves before/after fix.
+  Prompt: "Use @python-performance-optimization to compare training curves before/after fix.
            Before: outputs/[old_run]/training_history.json
            After: outputs/[new_run]/training_history.json
            Confirm: loss decreasing smoothly, val_dice improving, no divergence."
 ```
+
+**Additional Debugging Tools:**
+- Use `error-debugging-error-analysis` for deep error trace analysis
+- Use `debugging-toolkit-smart-debug` for interactive debugging strategies
 
 ---
 
@@ -910,10 +929,14 @@ Step 3 — Verify Pipeline  → @ml-engineer
 | :--- | :--- | :--- |
 | `react-best-practices` | Project không có React frontend. FastAPI sẽ serve HTML thuần hoặc trả về ảnh/JSON. | Không cần |
 | `rag-engineer` | Không có RAG pipeline, vector database, hay document retrieval trong project này. | Không cần |
-| `testing-patterns` | Skill này tập trung Jest/JavaScript testing patterns. Project dùng Python/pytest. | `python-pro` |
+| `python-patterns` | Skill này tập trung vào architecture decisions, framework selection. Dùng `python-pro` cho code quality. | `python-pro` |
 | `angular` / `angular-*` | Không có Angular frontend. | Không cần |
 | `nextjs-best-practices` | Không có Next.js. | Không cần |
+| `docker-expert` | Không cần containerize trong giai đoạn hiện tại. Chỉ hữu ích khi cần deployment. | Không cần |
 | `architecture` *(giai đoạn hiện tại)* | Chỉ hữu ích ở **Giai đoạn 4 (FastAPI)**. Đừng dùng cho ML research tasks hiện tại — sẽ cho advice về web architecture không liên quan. | `computer-vision-expert` cho phase hiện tại |
+| `mlops-engineer` | Thay thế bởi `ml-pipeline-workflow` cho end-to-end ML workflow. | `ml-pipeline-workflow` |
+| `data-scientist` | Thay thế bởi `python-performance-optimization` cho metrics analysis và `error-debugging-error-analysis` cho error analysis. | `python-performance-optimization`, `error-debugging-error-analysis` |
+| `debugging-strategies` | Thay thế bởi 3 skills chuyên biệt: `systematic-debugging`, `error-debugging-error-analysis`, `debugging-toolkit-smart-debug` | `systematic-debugging` · `error-debugging-error-analysis` · `debugging-toolkit-smart-debug` |
 
 ---
 
@@ -942,11 +965,11 @@ Step 3 — Verify Pipeline  → @ml-engineer
 - [ ] `@computer-vision-expert` → Thêm EfficientNet-B4 encoder — Task 3
 - [ ] `@computer-vision-expert` → Thêm SegFormer mit_b2 encoder — Task 4
 - [ ] `@computer-vision-expert` → Thêm DeepLabV3+ decoder — Task 5
-- [ ] `@mlops-engineer` → Setup W&B sweeps cho LR + loss weight search — Task 10
-- [ ] `@data-scientist` → Ablation study so sánh tất cả architectures — Task 11
-- [ ] `@data-scientist` → Phân tích training curves, diagnose overfitting — Task 12
+- [ ] `@ml-pipeline-workflow` → Setup W&B sweeps cho LR + loss weight search — Task 10
+- [ ] `@python-performance-optimization` → Ablation study so sánh tất cả architectures — Task 11
+- [ ] `@error-debugging-error-analysis` → Phân tích training curves, diagnose overfitting — Task 12
 
-**Skills:** `computer-vision-expert` · `ml-engineer` · `mlops-engineer` · `data-scientist`
+**Skills:** `computer-vision-expert` · `ml-engineer` · `ml-pipeline-workflow` · `python-performance-optimization` · `error-debugging-error-analysis`
 
 ---
 
@@ -954,11 +977,11 @@ Step 3 — Verify Pipeline  → @ml-engineer
 
 > Mục tiêu: Maximize throughput, minimize training time.
 
-- [ ] `@ml-engineer` → Tối ưu DataLoader (num_workers, prefetch) — Task 7
-- [ ] `@ml-engineer` → Review AMP / GradScaler implementation — Task 8
+- [ ] `@python-performance-optimization` → Tối ưu DataLoader (num_workers, prefetch) — Task 7
+- [ ] `@python-performance-optimization` → Review AMP / GradScaler implementation — Task 8
 - [ ] `@ml-engineer` → Multi-GPU DDP support (nếu cần) — Task 9
 
-**Skills:** `ml-engineer` · `debugging-strategies`
+**Skills:** `python-performance-optimization` · `ml-engineer` · `systematic-debugging`
 
 ---
 
@@ -966,11 +989,11 @@ Step 3 — Verify Pipeline  → @ml-engineer
 
 > Mục tiêu: Production-ready codebase, maintainable, testable.
 
-- [ ] `@python-pro` → Tạo test suite pytest cho `src/` — Task 15
-- [ ] `@python-patterns` → Setup ruff + pyproject.toml — Task 16
+- [ ] `@python-testing-patterns` → Tạo test suite pytest cho `src/` — Task 15
+- [ ] `@python-pro` → Setup ruff + pyproject.toml — Task 16
 - [ ] `@python-pro` → Audit type hints + docstrings cho `src/` — Task 17
 
-**Skills:** `python-pro` · `python-patterns`
+**Skills:** `python-testing-patterns` · `python-pro`
 
 ---
 
@@ -982,9 +1005,9 @@ Step 3 — Verify Pipeline  → @ml-engineer
 - [ ] `@ml-engineer` → ONNX / TorchScript export + benchmark — Task 21
 - [ ] `@docker-expert` → Dockerfile cho training pipeline — Task 18
 - [ ] `@docker-expert` → Dockerfile cho inference / FastAPI — Task 19
-- [ ] `@mlops-engineer` → Production monitoring, health checks, structured logging
+- [ ] `@ml-pipeline-workflow` → Production monitoring, health checks, structured logging
 
-**Skills:** `architecture` · `ml-engineer` · `docker-expert` · `mlops-engineer`
+**Skills:** `architecture` · `ml-engineer` · `docker-expert` · `ml-pipeline-workflow`
 
 ---
 
