@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import statistics
 from pathlib import Path
 from typing import Any
 
@@ -118,6 +119,53 @@ class Logger:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(self.history)
+
+        # Metrics summary (mean/std/min/max/median)
+        metrics_summary = self._build_metrics_summary(self.history)
+        if metrics_summary:
+            summary_json_path = self.output_dir / "metrics_summary.json"
+            with open(summary_json_path, "w") as f:
+                json.dump(metrics_summary, f, indent=2)
+
+            summary_csv_path = self.output_dir / "metrics_summary.csv"
+            with open(summary_csv_path, "w", newline="") as f:
+                writer = csv.DictWriter(
+                    f, fieldnames=["metric", "mean", "std", "min", "max", "median"]
+                )
+                writer.writeheader()
+                writer.writerows(metrics_summary)
+
+    def _build_metrics_summary(self, history: list[dict]) -> list[dict[str, float | str]]:
+        """
+        Tính Mean/Std/Min/Max/Median cho từng metric trong history.
+
+        Chỉ lấy các key có giá trị numeric (int/float) và bỏ qua "step".
+        """
+        metric_values: dict[str, list[float]] = {}
+        for row in history:
+            for key, value in row.items():
+                if key == "step":
+                    continue
+                if isinstance(value, (int, float)):
+                    metric_values.setdefault(key, []).append(float(value))
+
+        summary: list[dict[str, float | str]] = []
+        for metric, values in metric_values.items():
+            if not values:
+                continue
+            mean = float(statistics.fmean(values))
+            std = float(statistics.pstdev(values)) if len(values) > 1 else 0.0
+            summary.append(
+                {
+                    "metric": metric,
+                    "mean": mean,
+                    "std": std,
+                    "min": float(min(values)),
+                    "max": float(max(values)),
+                    "median": float(statistics.median(values)),
+                }
+            )
+        return summary
 
     # ------------------------------------------------------------------
     # Cleanup
