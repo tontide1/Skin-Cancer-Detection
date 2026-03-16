@@ -1,0 +1,4 @@
+interface:
+  display_name: "ML Engineer"
+  short_description: "Build and operate production ML systems"
+  default_prompt: "Use $ml-engineer to design or implement the ML system, serving path, monitoring, and rollout plan for this task."

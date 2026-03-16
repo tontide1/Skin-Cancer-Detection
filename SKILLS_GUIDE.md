@@ -4,6 +4,7 @@
 > File này là companion của `AGENTS.md`.
 > `AGENTS.md` = source of truth cho project rules.
 > `SKILLS_GUIDE.md` = hướng dẫn dùng AI skills hiệu quả nhất.
+> Canonical path cho bộ skill của repo này: `./.codex/skills/`
 
 ---
 
@@ -1141,5 +1142,6 @@ Metrics     →  Report 4-tuple: dice@0.5, iou@0.5, dice@best_thr, best_thr
 
 ---
 
-*Last updated: 2026-03-03 | Project: Skin-Cancer-Detection (ISIC 2018 Task 1)*
-*Skills installed: `.agents/skills/` (OpenCode) · `.cursor/skills/` (Cursor) · `.agent/skills/` (Antigravity)*
+*Last updated: 2026-03-16 | Project: Skin-Cancer-Detection (ISIC 2018 Task 1)*
+*Canonical repo skill path: `./.codex/skills/`*
+*Other tool locations may differ: `.agents/skills/` (OpenCode) · `.cursor/skills/` (Cursor) · `.agent/skills/` (Antigravity)*

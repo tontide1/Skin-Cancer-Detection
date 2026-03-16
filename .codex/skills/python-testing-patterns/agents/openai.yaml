@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Testing Patterns"
+  short_description: "Write and improve Python tests with pytest"
+  default_prompt: "Use $python-testing-patterns to add or improve Python tests for this change, including fixtures, mocks, and regression coverage."

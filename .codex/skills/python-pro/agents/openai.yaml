@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Pro"
+  short_description: "Apply modern Python engineering practices"
+  default_prompt: "Use $python-pro to design, refactor, or review this Python code with modern tooling, typing, testing, and production-ready patterns."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Python Performance"
+  short_description: "Profile and optimize Python bottlenecks"
+  default_prompt: "Use $python-performance-optimization to measure this Python bottleneck, identify the dominant cost, and propose or implement the highest-value optimization."

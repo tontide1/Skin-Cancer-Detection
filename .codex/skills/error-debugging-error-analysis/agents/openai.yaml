@@ -1,0 +1,4 @@
+interface:
+  display_name: "Error Analysis"
+  short_description: "Investigate incidents and recurring errors"
+  default_prompt: "Use $error-debugging-error-analysis to perform structured root-cause analysis on this incident, then propose the fix, validation, and prevention work."
