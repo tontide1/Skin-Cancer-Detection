@@ -38,6 +38,7 @@
 | `computer-vision-expert` | SOTA CV: SAM 3, segmentation, VLMs | Model architecture, augmentation, segmentation pipeline | OpenCode · Codex · Antigravity |
 | `ml-engineer` | PyTorch 2.x production, model serving | Training loop, AMP, DataLoader, inference | OpenCode · Codex · Antigravity |
 | `ml-pipeline-workflow` | ML pipeline từ data → deployment | End-to-end ML workflow, feature engineering, model validation | OpenCode · Codex · Antigravity |
+| `ai-engineer` | AI model development, integration, deployment | AI/ML integration, model serving, API development | OpenCode · Codex · Antigravity |
 | `python-pro` | Python 3.11+, modern tooling | Type hints, docstrings, project setup | OpenCode · Codex · Antigravity |
 | `python-testing-patterns` | Pytest patterns, test coverage | Test suite, unit tests, integration tests | OpenCode · Codex · Antigravity |
 | `python-performance-optimization` | Performance profiling, optimization | GPU optimization, memory optimization, profiling | OpenCode · Codex · Antigravity |
