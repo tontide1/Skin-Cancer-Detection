@@ -6,7 +6,7 @@ Binary **skin lesion segmentation** on the [ISIC 2018 Challenge – Task 1](http
 
 **Current Best:** U-Net + ResNet34 + SCSE attention (SMP) — Test Dice **0.9021** | IoU **0.8368** (epoch 41)
 **Registered models:** `"unet"`, `"deeplabv3"` (MobileNetV3-Large, torchvision)
-**Goal:** Dice > 0.90, then deploy as FastAPI web app.
+**Goal:** Dice > 0.95, then deploy as FastAPI web app.
 
 ---
 
