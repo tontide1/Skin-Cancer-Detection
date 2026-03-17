@@ -162,6 +162,61 @@ def _build_deeplabv3(config) -> nn.Module:
     return DeepLabV3Wrapper(model)
 
 
+def _build_deeplabv3plus(config) -> nn.Module:
+    """
+    DeepLabV3+ với SMP encoder backbone.
+
+    Supported config fields:
+        - model.encoder_name
+        - model.encoder_weights
+        - model.in_channels
+        - model.classes
+        - model.decoder_channels (int, default=256)
+        - model.encoder_output_stride (optional, 8 or 16)
+
+    Informational-only fields inherited from base config:
+        - decoder_attention_type
+    """
+    import segmentation_models_pytorch as smp
+
+    m = config.model
+
+    decoder_channels = getattr(m, "decoder_channels", 256)
+    if not isinstance(decoder_channels, int):
+        raise ValueError(
+            "DeepLabV3+ yêu cầu model.decoder_channels là số nguyên (int). "
+            f"Nhận được: {decoder_channels!r}"
+        )
+    if decoder_channels <= 0:
+        raise ValueError(
+            "DeepLabV3+ yêu cầu model.decoder_channels > 0. "
+            f"Nhận được: {decoder_channels}"
+        )
+
+    output_stride = int(getattr(m, "encoder_output_stride", 16))
+    if output_stride not in (8, 16):
+        raise ValueError(
+            "DeepLabV3+ chỉ hỗ trợ model.encoder_output_stride là 8 hoặc 16. "
+            f"Nhận được: {output_stride}"
+        )
+
+    decoder_attention_type = getattr(m, "decoder_attention_type", None)
+    if decoder_attention_type is not None:
+        _log.warning(
+            "deeplabv3plus (SMP) ignores model.decoder_attention_type=%r.",
+            decoder_attention_type,
+        )
+
+    return smp.DeepLabV3Plus(
+        encoder_name=m.encoder_name,
+        encoder_weights=m.encoder_weights,
+        encoder_output_stride=output_stride,
+        decoder_channels=decoder_channels,
+        in_channels=m.in_channels,
+        classes=m.classes,
+    )
+
+
 # =============================================================================
 # Factory
 # =============================================================================
@@ -170,6 +225,7 @@ _REGISTRY = {
     "unet": _build_unet,
     "unet_original": _build_unet_original,
     "deeplabv3": _build_deeplabv3,
+    "deeplabv3plus": _build_deeplabv3plus,
 }
 
 
