@@ -31,8 +31,22 @@ Binary **skin lesion segmentation** on the [ISIC 2018 Challenge – Task 1](http
 conda activate CV
 pip install -e .
 
-# Data preparation (once)
-python scripts/prepare_data.py --data-dir data/ --out-dir data/processed
+# Lint (check code style)
+ruff check src/ scripts/ tests/
+ruff check src/ scripts/ tests/ --fix  # auto-fix
+
+# Data preparation (new dataset structure - HA10000 remove-hair)
+# Input: data/data-HA10000-remove-hair/remove-hair/images + masks/
+# Output: data/processed/train|val|test/images + masks/
+python scripts/prepare_data.py \
+    --data-dir data/data-HA10000-remove-hair \
+    --out-dir data/processed
+
+# Custom split ratios (default: 80/10/10)
+python scripts/prepare_data.py \
+    --data-dir data/data-HA10000-remove-hair \
+    --out-dir data/processed \
+    --train-ratio 0.8 --val-ratio 0.1 --test-ratio 0.1 --seed 42
 
 # Train
 python scripts/train.py --config configs/experiments/resnet34_unet_v1.yaml
@@ -49,6 +63,31 @@ python scripts/predict.py \
     --config configs/experiments/resnet34_unet_v1.yaml \
     --input data/processed/test/images/ISIC_0024306.jpg \
     --checkpoint outputs/resnet34_unet_v1/best_model.pth --overlay --tta
+```
+
+### Kaggle Training & Evaluation
+
+```bash
+# Train on Kaggle (2-GPU T4)
+%cd /kaggle/working
+!git clone https://github.com/tontiphan/Skin-Cancer-Detection.git
+%cd Skin-Cancer-Detection
+!git checkout stage1
+!pip install -r requirements.txt -q
+!torchrun --standalone --nnodes=1 --nproc_per_node=2 scripts/train.py \
+  --device-mode ddp \
+  --config configs/experiments/resnet34_unet_kaggle_t4.yaml \
+  data.root=/kaggle/input/datasets/tntiphan/isic-2018-task-1 \
+  output.dir=/kaggle/working \
+  logging.use_wandb=false
+
+# Evaluate on Kaggle test set
+!python scripts/evaluate.py \
+  --config configs/experiments/resnet34_unet_kaggle_t4.yaml \
+  --checkpoint /kaggle/working/resnet34_unet_kaggle_t4/best_model.pth \
+  data.root=/kaggle/input/datasets/tntiphan/isic-2018-task-1 \
+  output.dir=/kaggle/working \
+  logging.use_wandb=false
 ```
 
 ### Testing
