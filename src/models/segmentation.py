@@ -53,6 +53,49 @@ def _build_unet(config) -> nn.Module:
     )
 
 
+def _build_unet_original(config) -> nn.Module:
+    """
+    Original U-Net (plain encoder-decoder, không pretrained backbone).
+
+    Supported config fields:
+        - model.in_channels (int)
+        - model.classes (int)
+        - model.base_channels (optional int, default=64)
+
+    Informational-only fields inherited from base config:
+        - encoder_name
+        - encoder_weights
+        - decoder_attention_type
+        - decoder_channels
+    """
+    from src.models.unet_original import UNetOriginal
+
+    m = config.model
+    base_channels = int(getattr(m, "base_channels", 64))
+
+    ignored_fields = (
+        "encoder_name",
+        "encoder_weights",
+        "decoder_attention_type",
+        "decoder_channels",
+    )
+    for field in ignored_fields:
+        value = getattr(m, field, None)
+        if value is not None:
+            _log.warning(
+                "unet_original ignores model.%s=%r. "
+                "Set to null in the experiment YAML to silence this warning.",
+                field,
+                value,
+            )
+
+    return UNetOriginal(
+        in_channels=int(m.in_channels),
+        num_classes=int(m.classes),
+        base_channels=base_channels,
+    )
+
+
 def _build_deeplabv3(config) -> nn.Module:
     """
     DeepLabV3 với MobileNetV3-Large backbone (torchvision).
@@ -125,6 +168,7 @@ def _build_deeplabv3(config) -> nn.Module:
 
 _REGISTRY = {
     "unet": _build_unet,
+    "unet_original": _build_unet_original,
     "deeplabv3": _build_deeplabv3,
 }
 

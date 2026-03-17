@@ -1,0 +1,23 @@
+# =============================================================================
+# Experiment: unet_original_v1
+# Baseline U-Net (Ronneberger et al., 2015) without BatchNorm
+# =============================================================================
+
+_base_: ../base.yaml
+
+model:
+  name: unet_original
+  in_channels: 3
+  classes: 1
+  base_channels: 64
+  encoder_name: null
+  encoder_weights: null
+  decoder_attention_type: null
+  decoder_channels: null
+
+training:
+  batch_size: 16
+  lr: 5.0e-4
+
+logging:
+  experiment_name: unet_original_v1
