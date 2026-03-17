@@ -25,24 +25,22 @@ from src.utils.logger import Logger
 from src.utils.misc import plot_training_curves
 
 logger = logging.getLogger(__name__)
+_VAL_METRIC_SEMANTICS = "macro_per_sample_v1"
 
 
 def _compute_warmup_lr(
     epoch: int,
     warmup_epochs: int,
-    warmup_start_lr: float,
-    target_lr: float,
 ) -> float:
     """
-    Compute linear warmup learning rate.
+    Compute linear warmup progress factor in [0, 1].
 
     Warmup progress uses (epoch + 1) / warmup_epochs so that the final warmup
-    epoch reaches exactly target_lr.
+    epoch reaches exactly the target learning rate.
     """
     if warmup_epochs <= 0:
-        return target_lr
-    progress = min((epoch + 1) / warmup_epochs, 1.0)
-    return warmup_start_lr + (target_lr - warmup_start_lr) * progress
+        return 1.0
+    return min((epoch + 1) / warmup_epochs, 1.0)
 
 
 class Trainer:
@@ -82,6 +80,7 @@ class Trainer:
 
         # Optimizer
         self.optimizer = self._build_optimizer()
+        self._init_warmup_param_groups(force=True)
 
         # LR Scheduler
         self.scheduler = self._build_scheduler()
@@ -195,6 +194,34 @@ class Trainer:
             )
         raise ValueError(f"Scheduler '{name}' chưa được hỗ trợ.")
 
+    def _get_default_base_lrs(self) -> list[float]:
+        """Infer target LR for each optimizer param group from config."""
+        main_lr = float(self.config.training.lr)
+        group_count = len(self.optimizer.param_groups)
+        if group_count == 1:
+            return [main_lr]
+
+        diff_lr_cfg = getattr(self.config.training, "differential_lr", None)
+        if group_count == 2 and diff_lr_cfg is not None and getattr(diff_lr_cfg, "enabled", False):
+            encoder_lr = main_lr * float(getattr(diff_lr_cfg, "encoder_lr_scale", 0.1))
+            return [encoder_lr, main_lr]
+
+        return [float(pg.get("lr", main_lr)) for pg in self.optimizer.param_groups]
+
+    def _init_warmup_param_groups(self, force: bool = False) -> None:
+        """Attach warmup metadata to optimizer param groups."""
+        main_lr = float(self.config.training.lr)
+        if main_lr <= 0:
+            raise ValueError("training.lr phải > 0 để dùng warmup.")
+
+        warmup_start_lr = float(getattr(self.config.lr_schedule, "warmup_start_lr", 1e-6))
+        base_lrs = self._get_default_base_lrs()
+        for pg, base_lr in zip(self.optimizer.param_groups, base_lrs, strict=False):
+            if force or "warmup_base_lr" not in pg:
+                pg["warmup_base_lr"] = float(base_lr)
+            if force or "warmup_start_lr" not in pg:
+                pg["warmup_start_lr"] = warmup_start_lr * (float(pg["warmup_base_lr"]) / main_lr)
+
     def _sync_epoch_totals(
         self,
         total_loss: float,
@@ -282,13 +309,11 @@ class Trainer:
         """
         Validate model. Returns dict metrics.
 
-        Dice và IoU được tính per-sample (accumulate intersection/union trực tiếp)
-        thay vì per-batch-mean, tránh sai lệch do last incomplete batch.
+        Dice và IoU được tính macro-average theo sample để nhất quán với
+        train/test metrics.
         """
         self.model.eval()
-        total_loss = 0.0
-        # Per-sample accumulators (threshold=0.5)
-        total_intersection = total_pred_sum = total_target_sum = 0.0
+        total_loss = total_dice = total_iou = 0.0
         n_samples = 0
 
         pbar = tqdm(loader, desc="Val  ", leave=False, disable=not self.is_main_process)
@@ -305,55 +330,25 @@ class Trainer:
 
             n = images.size(0)
             total_loss += loss.item() * n
-
-            # Per-sample Dice/IoU — accumulate raw counts, divide once at end
-            probs = torch.sigmoid(logits)
-            binary = (probs > 0.5).float()
-            flat_pred = binary.view(n, -1)
-            flat_mask = masks.float().view(n, -1)
-
-            intersection = (flat_pred * flat_mask).sum(dim=1)
-            pred_sum = flat_pred.sum(dim=1)
-            target_sum = flat_mask.sum(dim=1)
-
-            total_intersection += float(intersection.sum().item())
-            total_pred_sum += float(pred_sum.sum().item())
-            total_target_sum += float(target_sum.sum().item())
+            d = dice_coefficient(logits, masks)
+            i = iou_score(logits, masks)
+            total_dice += d * n
+            total_iou += i * n
             n_samples += n
 
             if self.is_main_process:
-                # Show approximate per-batch dice for progress bar
-                batch_dice = float(
-                    ((2.0 * intersection + 1e-7) / (pred_sum + target_sum + 1e-7)).mean().item()
-                )
-                pbar.set_postfix(dice=f"{batch_dice:.4f}")
+                pbar.set_postfix(dice=f"{d:.4f}")
 
-        # Sync across DDP workers
-        sync_stats = torch.tensor(
-            [total_loss, total_intersection, total_pred_sum, total_target_sum, float(n_samples)],
-            device=self.device,
-            dtype=torch.float64,
+        total_loss, total_dice, total_iou, n_samples = self._sync_epoch_totals(
+            total_loss, total_dice, total_iou, n_samples
         )
-        if self.is_distributed:
-            dist.all_reduce(sync_stats, op=dist.ReduceOp.SUM)
-        total_loss = float(sync_stats[0].item())
-        total_intersection = float(sync_stats[1].item())
-        total_pred_sum = float(sync_stats[2].item())
-        total_target_sum = float(sync_stats[3].item())
-        n_samples = int(sync_stats[4].item())
 
         if n_samples == 0:
             raise RuntimeError("Validation loader không có sample nào.")
-
-        eps = 1e-7
-        val_dice = (2.0 * total_intersection + eps) / (total_pred_sum + total_target_sum + eps)
-        val_iou = (total_intersection + eps) / (
-            total_pred_sum + total_target_sum - total_intersection + eps
-        )
         return {
             "val_loss": total_loss / n_samples,
-            "val_dice": val_dice,
-            "val_iou": val_iou,
+            "val_dice": total_dice / n_samples,
+            "val_iou": total_iou / n_samples,
         }
 
     # ------------------------------------------------------------------
@@ -416,6 +411,7 @@ class Trainer:
                 print(f"  Restored previous best {monitor}={prev_best:.4f} ({epoch_text})")
 
         lr_cfg = self.config.lr_schedule
+        sched_monitor = lr_cfg.monitor
         warmup_epochs = int(getattr(lr_cfg, "warmup_epochs", 0) or 0)
         warmup_start_lr = float(getattr(lr_cfg, "warmup_start_lr", 1e-6))
         target_lr = float(self.config.training.lr)
@@ -438,14 +434,14 @@ class Trainer:
 
             # --- Warmup LR (linear ramp before main scheduler) ---
             if epoch < warmup_epochs:
-                warmup_lr = _compute_warmup_lr(
+                warmup_factor = _compute_warmup_lr(
                     epoch=epoch,
                     warmup_epochs=warmup_epochs,
-                    warmup_start_lr=warmup_start_lr,
-                    target_lr=target_lr,
                 )
                 for pg in self.optimizer.param_groups:
-                    pg["lr"] = warmup_lr
+                    start_lr = float(pg["warmup_start_lr"])
+                    base_lr = float(pg["warmup_base_lr"])
+                    pg["lr"] = start_lr + (base_lr - start_lr) * warmup_factor
 
             # --- Train ---
             train_metrics = self.train_one_epoch(train_loader)
@@ -453,6 +449,11 @@ class Trainer:
 
             lr = self.optimizer.param_groups[0]["lr"]
             epoch_metrics = {**train_metrics, **val_metrics, "lr": lr}
+            if sched_monitor not in epoch_metrics:
+                raise ValueError(
+                    f"lr_schedule.monitor='{sched_monitor}' không tồn tại trong epoch metrics. "
+                    f"Available: {sorted(epoch_metrics.keys())}"
+                )
 
             # --- Log ---
             self.log.log(epoch_metrics, step=epoch + 1)
@@ -476,7 +477,10 @@ class Trainer:
                     monitor_value,
                     self.model,
                     epoch,
-                    extra={"val_iou": val_metrics["val_iou"]},
+                    extra={
+                        "val_iou": val_metrics["val_iou"],
+                        "val_metric_semantics": _VAL_METRIC_SEMANTICS,
+                    },
                     model_config=self.config.model.to_dict(),
                 )
                 if is_best:
@@ -497,7 +501,7 @@ class Trainer:
             if epoch >= warmup_epochs:
                 sched = self.config.lr_schedule.scheduler.lower()
                 if sched == "reduce_on_plateau":
-                    self.scheduler.step(val_metrics[monitor])
+                    self.scheduler.step(epoch_metrics[sched_monitor])
                 else:
                     self.scheduler.step()
 
@@ -565,6 +569,7 @@ class Trainer:
             "best_epoch": checkpoint.best_epoch,
             "best_metrics": best_metrics,
             "training_history": self.log.history,
+            "val_metric_semantics": _VAL_METRIC_SEMANTICS,
         }
         torch.save(payload, output_dir / "last_checkpoint.pth")
 
@@ -579,6 +584,7 @@ class Trainer:
         best = self._resume_state.get("best")
         best_epoch = self._resume_state.get("best_epoch")
         best_metrics = self._resume_state.get("best_metrics")
+        metric_semantics = self._resume_state.get("val_metric_semantics")
         if not isinstance(best_metrics, dict):
             best_metrics = {}
         else:
@@ -588,15 +594,18 @@ class Trainer:
         if best_model_path.exists():
             try:
                 ckpt = torch.load(best_model_path, map_location="cpu", weights_only=True)
-                if best is None and monitor in ckpt:
-                    best = float(ckpt[monitor])
-                if best_epoch is None and "epoch" in ckpt:
-                    best_epoch = int(ckpt["epoch"])
+                if metric_semantics is None:
+                    metric_semantics = ckpt.get("val_metric_semantics")
+                if metric_semantics == _VAL_METRIC_SEMANTICS:
+                    if best is None and monitor in ckpt:
+                        best = float(ckpt[monitor])
+                    if best_epoch is None and "epoch" in ckpt:
+                        best_epoch = int(ckpt["epoch"])
             except Exception as exc:  # pragma: no cover - defensive path
                 logger.warning("Không đọc được best_model.pth để restore best state: %s", exc)
 
         summary_path = output_dir / "training_summary.json"
-        if summary_path.exists():
+        if metric_semantics == _VAL_METRIC_SEMANTICS and summary_path.exists():
             try:
                 with open(summary_path, "r") as f:
                     summary = json.load(f)
@@ -608,6 +617,14 @@ class Trainer:
                 logger.warning(
                     "Không đọc được training_summary.json để restore best state: %s", exc
                 )
+
+        if metric_semantics != _VAL_METRIC_SEMANTICS:
+            logger.warning(
+                "Resume checkpoint dùng val metric semantics cũ hoặc thiếu metadata. "
+                "Reset best-state để tránh so sánh legacy metrics với %s.",
+                _VAL_METRIC_SEMANTICS,
+            )
+            return None, None, {}
 
         if best is None and isinstance(best_metrics.get(monitor), (float, int)):
             best = float(best_metrics[monitor])
@@ -637,6 +654,7 @@ class Trainer:
         if resume:
             if "optimizer_state_dict" in ckpt:
                 self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+                self._init_warmup_param_groups(force=False)
             if "scheduler_state_dict" in ckpt:
                 self.scheduler.load_state_dict(ckpt["scheduler_state_dict"])
             if "scaler_state_dict" in ckpt:
@@ -648,6 +666,7 @@ class Trainer:
                 "best": ckpt.get("best"),
                 "best_epoch": ckpt.get("best_epoch"),
                 "best_metrics": ckpt.get("best_metrics", {}),
+                "val_metric_semantics": ckpt.get("val_metric_semantics"),
             }
             logger.info(
                 "Resumed full training state (optimizer + scheduler + scaler) from %s at epoch %d",

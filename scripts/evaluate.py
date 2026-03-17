@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import statistics
 import sys
 from pathlib import Path
 
@@ -64,6 +65,7 @@ def evaluate(
     loader: DataLoader,
     device: torch.device,
     criterion: CombinedLoss,
+    split: str = "test",
     threshold: float = 0.5,
     use_tta: bool = True,
 ) -> dict:
@@ -71,8 +73,12 @@ def evaluate(
     model.eval()
     total_loss = 0.0
     thresholds = [round(t, 2) for t in torch.arange(0.3, 0.71, 0.05).tolist()]
+    idx_report = min(range(len(thresholds)), key=lambda i: abs(thresholds[i] - threshold))
+    report_thr = thresholds[idx_report]
     dice_sums = [0.0 for _ in thresholds]
     iou_sums = [0.0 for _ in thresholds]
+    dice_values: list[float] = []
+    iou_values: list[float] = []
     total_samples = 0
 
     for images, masks in tqdm(loader, desc="Evaluating"):
@@ -81,7 +87,8 @@ def evaluate(
 
         if use_tta:
             probs = tta_predict(model, images)
-            logits = torch.logit(probs.clamp(1e-6, 1 - 1e-6))  # probs → logits for loss
+            # Keep loss comparable to non-TTA by using single-pass logits.
+            logits = model(images)
         else:
             logits = model(images)
             probs = torch.sigmoid(logits)
@@ -95,6 +102,17 @@ def evaluate(
         probs_flat = probs.view(n, -1)
         masks_flat = masks.float().view(n, -1)
         target_sum = masks_flat.sum(dim=1)
+
+        # Per-sample metrics at the reported threshold for summary stats.
+        pred_flat_report = (probs_flat > report_thr).float()
+        intersection_report = (pred_flat_report * masks_flat).sum(dim=1)
+        pred_sum_report = pred_flat_report.sum(dim=1)
+        dice_report = (2.0 * intersection_report + 1e-7) / (pred_sum_report + target_sum + 1e-7)
+        iou_report = (intersection_report + 1e-7) / (
+            pred_sum_report + target_sum - intersection_report + 1e-7
+        )
+        dice_values.extend(dice_report.tolist())
+        iou_values.extend(iou_report.tolist())
 
         for idx, thr in enumerate(thresholds):
             pred_flat = (probs_flat > thr).float()
@@ -110,18 +128,43 @@ def evaluate(
     if total_samples == 0:
         raise RuntimeError("Loader rỗng, không có sample để evaluate.")
 
+    def _summarize(values: list[float]) -> dict[str, float]:
+        if not values:
+            return {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0, "median": 0.0}
+        mean = float(statistics.fmean(values))
+        std = float(statistics.pstdev(values)) if len(values) > 1 else 0.0
+        return {
+            "mean": mean,
+            "std": std,
+            "min": float(min(values)),
+            "max": float(max(values)),
+            "median": float(statistics.median(values)),
+        }
+
     mean_dice = [s / total_samples for s in dice_sums]
     mean_iou = [s / total_samples for s in iou_sums]
-    idx_05 = min(range(len(thresholds)), key=lambda i: abs(thresholds[i] - threshold))
     best_idx = max(range(len(thresholds)), key=lambda i: mean_dice[i])
+    split_prefix = split.lower()
+
+    tta_loss_note = (
+        "loss computed from non-TTA logits for comparability" if use_tta else "loss computed normally"
+    )
 
     return {
         "loss": total_loss / total_samples,
-        "dice": mean_dice[idx_05],
-        "iou": mean_iou[idx_05],
+        "dice": mean_dice[idx_report],
+        "iou": mean_iou[idx_report],
         "best_threshold": thresholds[best_idx],
         "best_dice_at_best_thr": mean_dice[best_idx],
         "best_iou_at_best_thr": mean_iou[best_idx],
+        f"{split_prefix}_dice": mean_dice[idx_report],
+        f"{split_prefix}_iou": mean_iou[idx_report],
+        f"{split_prefix}_dice_best": mean_dice[best_idx],
+        f"{split_prefix}_iou_best": mean_iou[best_idx],
+        "threshold_report": report_thr,
+        "dice_stats": _summarize(dice_values),
+        "iou_stats": _summarize(iou_values),
+        "tta_loss_note": tta_loss_note,
     }
 
 
@@ -168,6 +211,8 @@ def main() -> None:
     set_seed(config.seed, deterministic=bool(getattr(config.training, "deterministic", True)))
     device = get_device()
     log.info(f"Device: {device} | TTA: {args.tta} | Split: {args.split}")
+    if args.tta:
+        log.info("TTA enabled; loss will be computed from non-TTA logits for comparability.")
 
     # Dataset
     root = Path(config.data.root)
@@ -196,20 +241,43 @@ def main() -> None:
     criterion = CombinedLoss(config)
 
     # Evaluate
-    results = evaluate(model, loader, device, criterion, use_tta=args.tta)
+    results = evaluate(model, loader, device, criterion, split=args.split, use_tta=args.tta)
 
     # Print
     print("\n" + "=" * 60)
     print(f"  EVALUATION RESULTS ({args.split.upper()} SET)")
     print("=" * 60)
     print(f"  Loss:                    {results['loss']:.4f}")
-    print(f"  Dice  @ thr=0.50:        {results['dice']:.4f}")
-    print(f"  IoU   @ thr=0.50:        {results['iou']:.4f}")
+    print(
+        f"  {args.split}_dice @ thr={results['threshold_report']:.2f}:  "
+        f"{results[f'{args.split}_dice']:.4f}"
+    )
+    print(
+        f"  {args.split}_iou  @ thr={results['threshold_report']:.2f}:  "
+        f"{results[f'{args.split}_iou']:.4f}"
+    )
     print(f"  Best threshold:          {results['best_threshold']:.2f}")
-    print(f"  Dice  @ best thr:        {results['best_dice_at_best_thr']:.4f}")
-    print(f"  IoU   @ best thr:        {results['best_iou_at_best_thr']:.4f}")
+    print(f"  {args.split}_dice_best:       {results[f'{args.split}_dice_best']:.4f}")
+    print(f"  {args.split}_iou_best @ best thr: {results[f'{args.split}_iou_best']:.4f}")
     print(f"  TTA:                     {args.tta}")
     print("=" * 60)
+
+    if args.split == "test":
+        dice_stats = results["dice_stats"]
+        iou_stats = results["iou_stats"]
+        print("  Dice stats (per-sample @ reported threshold):")
+        print(
+            f"    mean={dice_stats['mean']:.4f} std={dice_stats['std']:.4f} "
+            f"min={dice_stats['min']:.4f} max={dice_stats['max']:.4f} "
+            f"median={dice_stats['median']:.4f}"
+        )
+        print("  IoU stats (per-sample @ reported threshold):")
+        print(
+            f"    mean={iou_stats['mean']:.4f} std={iou_stats['std']:.4f} "
+            f"min={iou_stats['min']:.4f} max={iou_stats['max']:.4f} "
+            f"median={iou_stats['median']:.4f}"
+        )
+        print("=" * 60)
 
     # Save results JSON next to checkpoint
     ckpt_path = Path(args.checkpoint)
@@ -217,6 +285,22 @@ def main() -> None:
     with open(out_path, "w") as f:
         json.dump({"split": args.split, "tta": args.tta, **results}, f, indent=2)
     log.info(f"Results saved: {out_path}")
+
+    if args.split == "test":
+        stats_path = ckpt_path.parent / f"eval_{args.split}_metric_stats.json"
+        with open(stats_path, "w") as f:
+            json.dump(
+                {
+                    "split": args.split,
+                    "tta": args.tta,
+                    "threshold_report": results["threshold_report"],
+                    "dice_stats": results["dice_stats"],
+                    "iou_stats": results["iou_stats"],
+                },
+                f,
+                indent=2,
+            )
+        log.info(f"Metric stats saved: {stats_path}")
 
 
 if __name__ == "__main__":

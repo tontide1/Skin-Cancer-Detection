@@ -1,0 +1,4 @@
+interface:
+  display_name: "Computer Vision Expert"
+  short_description: "Design and optimize computer vision systems"
+  default_prompt: "Use $computer-vision-expert to design or improve a computer vision pipeline, including model choice, data strategy, evaluation, and deployment tradeoffs."

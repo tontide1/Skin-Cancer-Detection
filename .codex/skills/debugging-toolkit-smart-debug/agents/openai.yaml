@@ -1,0 +1,4 @@
+interface:
+  display_name: "Smart Debug Toolkit"
+  short_description: "Drive debugging with evidence from observability data"
+  default_prompt: "Use $debugging-toolkit-smart-debug to triage this failure with logs, traces, metrics, hypotheses, and a clear root-cause report."

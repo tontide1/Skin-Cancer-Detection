@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Engineer"
+  short_description: "Build and review production generative AI features"
+  default_prompt: "Use $ai-engineer to design or implement an LLM, RAG, or agent feature with architecture, safety, evaluation, and rollout guidance."

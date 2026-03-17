@@ -261,6 +261,7 @@ def main() -> None:
                 model,
                 device_ids=[dist_ctx.local_rank],
                 output_device=dist_ctx.local_rank,
+                find_unused_parameters=True,
             )
 
         model_ref = model.module if hasattr(model, "module") else model

@@ -10,7 +10,7 @@ data/ISIC2018_Task1-2_Test_Input
 data/ISIC2018_Task1-2_Training_Input
 data/ISIC2018_Task1-2_Validation_Input
 data/processed
-
+data/
 
 # Project data & large model outputs
 outputs/**/*.pth

@@ -1,0 +1,4 @@
+interface:
+  display_name: "ML Pipeline Workflow"
+  short_description: "Design end-to-end ML pipeline automation"
+  default_prompt: "Use $ml-pipeline-workflow to design or refine the pipeline stages, lineage, gating, retries, and deployment flow for this ML workflow."
