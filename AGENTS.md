@@ -5,7 +5,7 @@
 Binary **skin lesion segmentation** on the [ISIC 2018 Challenge – Task 1](https://challenge.isic-archive.com/landing/2018/) dataset.
 
 **Current Best:** U-Net + ResNet34 + SCSE attention (SMP) — Test Dice **0.9021** | IoU **0.8368** (epoch 41)
-**Registered models:** `"unet"`, `"deeplabv3"` (MobileNetV3-Large, torchvision)
+**Registered models:** `"unet"`, `"unet_original"`, `"deeplabv3"` (MobileNetV3-Large, torchvision), `"deeplabv3plus"` (SMP)
 **Goal:** Dice > 0.95, then deploy as FastAPI web app.
 
 ---
@@ -52,11 +52,16 @@ python scripts/prepare_data.py \
 python scripts/train.py --config configs/experiments/resnet34_unet_v1.yaml
 python scripts/train.py --config configs/experiments/resnet34_unet_v1.yaml \
     training.batch_size=32 model.encoder_name=efficientnet-b4 logging.use_wandb=false
+python scripts/train.py --config configs/experiments/unet_original_v1.yaml
+python scripts/train.py --config configs/experiments/resnet50_deeplabv3plus_v1.yaml
 
 # Evaluate (TTA + threshold search)
 python scripts/evaluate.py \
     --config configs/experiments/resnet34_unet_v1.yaml \
     --checkpoint outputs/resnet34_unet_v1/best_model.pth
+python scripts/evaluate.py \
+    --config configs/experiments/resnet50_deeplabv3plus_v1.yaml \
+    --checkpoint outputs/resnet50_deeplabv3plus_v1/best_model.pth
 
 # Predict (3-panel overlay: original | mask | overlay)
 python scripts/predict.py \
@@ -88,6 +93,29 @@ python scripts/predict.py \
   data.root=/kaggle/input/datasets/tntiphan/isic-2018-task-1 \
   output.dir=/kaggle/working \
   logging.use_wandb=false
+
+# Train DeepLabV3+ (ResNet50) on Kaggle (2-GPU T4)
+# training.batch_size=16/process => global batch size = 32
+!torchrun --standalone --nnodes=1 --nproc_per_node=2 scripts/train.py \
+  --device-mode ddp \
+  --config configs/experiments/resnet50_deeplabv3plus_v1.yaml \
+  data.root=/kaggle/input/datasets/tntiphan/isic-2018-task-1 \
+  output.dir=/kaggle/working \
+  logging.use_wandb=false \
+  training.batch_size=16 \
+  training.deterministic=false \
+  data.num_workers=4
+
+# Evaluate DeepLabV3+ on Kaggle test set
+!python scripts/evaluate.py \
+  --config configs/experiments/resnet50_deeplabv3plus_v1.yaml \
+  --checkpoint /kaggle/working/resnet50_deeplabv3plus_v1/best_model.pth \
+  --split test \
+  data.root=/kaggle/input/datasets/tntiphan/isic-2018-task-1 \
+  output.dir=/kaggle/working \
+  logging.use_wandb=false \
+  training.batch_size=16 \
+  data.num_workers=4
 ```
 
 ### Testing
@@ -99,10 +127,13 @@ pytest tests/ -v
 # Run a single test FILE
 pytest tests/test_trainer_robustness.py -v
 pytest tests/models/test_deeplabv3_factory.py -v
+pytest tests/models/test_unet_original_factory.py -v
+pytest tests/models/test_deeplabv3plus_factory.py -v
 
 # Run a single test FUNCTION
 pytest tests/test_trainer_robustness.py::test_warmup_preserves_differential_lr_ratio -v
 pytest tests/models/test_deeplabv3_factory.py::test_deeplabv3_factory_uses_backbone_imagenet_weights -v
+pytest tests/models/test_deeplabv3plus_factory.py::test_deeplabv3plus_factory_passes_expected_args -v
 
 # Skip integration tests (require real torchvision/GPU)
 pytest tests/ -v --ignore=tests/models/test_deeplabv3_integration.py
@@ -215,7 +246,7 @@ model_ref = model.module if hasattr(model, "module") else model
 7. Train → Evaluate → report all 5 metric keys
 
 **Candidate architectures:** `efficientnet-b4/b6` (SMP, drop-in), `mit_b2/b4` (SegFormer),
-`DeepLabV3+` (ResNet50/EfficientNet), SAM fine-tuned on ISIC, Swin-UNet / TransUNet.
+SAM fine-tuned on ISIC, Swin-UNet / TransUNet.
 
 ---
 
@@ -225,6 +256,16 @@ model_ref = model.module if hasattr(model, "module") else model
 - `encoder_name` is informational only — builder always uses MobileNetV3-Large; wrong value → warning
 - `aux_loss=False` hard-coded; use `load_state_dict_with_aux_compat()` for legacy checkpoints
 - Minimum input size: **≥ 128×128** (ASPP BatchNorm crashes smaller) — default `[256, 256]` is safe
+
+---
+
+## DeepLabV3+ — Known Constraints
+
+- Implemented via SMP as `model.name: deeplabv3plus` (not torchvision wrapper)
+- `model.decoder_channels` **must** be a positive `int` (e.g. `256`)
+- `model.encoder_output_stride` chỉ hỗ trợ `8` hoặc `16`
+- `model.decoder_attention_type` is informational-only for this builder (ignored with warning)
+- Nếu `encoder_weights: imagenet` và môi trường không có internet/cache pretrained weights, model init có thể fail
 
 ---
 

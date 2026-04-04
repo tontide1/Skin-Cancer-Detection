@@ -1,0 +1,23 @@
+# =============================================================================
+# Experiment: resnet50_deeplabv3plus_v1
+# DeepLabV3+ (SMP) with ResNet50 encoder
+# =============================================================================
+
+_base_: ../base.yaml
+
+model:
+  name: deeplabv3plus
+  encoder_name: resnet50
+  encoder_weights: imagenet
+  decoder_channels: 256
+  decoder_attention_type: null
+  encoder_output_stride: 16
+  in_channels: 3
+  classes: 1
+
+training:
+  batch_size: 32
+  lr: 3.0e-4
+
+logging:
+  experiment_name: resnet50_deeplabv3plus_v1

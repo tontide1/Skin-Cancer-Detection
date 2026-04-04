@@ -447,8 +447,12 @@ class Trainer:
             train_metrics = self.train_one_epoch(train_loader)
             val_metrics = self.validate(val_loader)
 
-            lr = self.optimizer.param_groups[0]["lr"]
-            epoch_metrics = {**train_metrics, **val_metrics, "lr": lr}
+            lr_groups = [float(pg["lr"]) for pg in self.optimizer.param_groups]
+            lr_main = max(lr_groups) if lr_groups else 0.0
+            epoch_metrics = {**train_metrics, **val_metrics, "lr": lr_main}
+            if len(lr_groups) >= 2:
+                epoch_metrics["lr_encoder"] = lr_groups[0]
+                epoch_metrics["lr_decoder"] = lr_groups[1]
             if sched_monitor not in epoch_metrics:
                 raise ValueError(
                     f"lr_schedule.monitor='{sched_monitor}' không tồn tại trong epoch metrics. "
@@ -460,13 +464,16 @@ class Trainer:
 
             # --- Print ---
             if self.is_main_process:
+                lr_text = f"lr={lr_main:.2e}"
+                if len(lr_groups) >= 2:
+                    lr_text = f"lr_enc={lr_groups[0]:.2e} lr_dec={lr_groups[1]:.2e}"
                 print(
                     f"Epoch {epoch + 1:03d} | "
                     f"loss={train_metrics['train_loss']:.4f} "
                     f"dice={train_metrics['train_dice']:.4f} | "
                     f"val_loss={val_metrics['val_loss']:.4f} "
                     f"val_dice={val_metrics['val_dice']:.4f} | "
-                    f"lr={lr:.2e}"
+                    f"{lr_text}"
                 )
 
             # --- Checkpoint ---
