@@ -22,6 +22,7 @@ model:
 # -----------------------------------------------------------------------------
 training:
   batch_size: 64
+  find_unused_parameters: false       # DDP only: set true for models with conditional unused branches
   max_epochs: 500
   optimizer: adamw                    # "adamw" | "adam" | "sgd"
   lr: 2.0e-4

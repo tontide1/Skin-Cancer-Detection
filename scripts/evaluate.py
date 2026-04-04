@@ -54,6 +54,11 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
+def _resolve_eval_batch_size(config) -> int:
+    """Resolve evaluation batch size from training batch size and val multiplier."""
+    return config.training.batch_size * int(getattr(config.data, "val_batch_size_multiplier", 2))
+
+
 # ---------------------------------------------------------------------------
 # Evaluation loop
 # ---------------------------------------------------------------------------
@@ -221,9 +226,10 @@ def main() -> None:
         mask_dir=root / args.split / "masks",
         transform=get_transforms("val", config),  # no augmentation for eval
     )
+    eval_batch_size = _resolve_eval_batch_size(config)
     loader = DataLoader(
         dataset,
-        batch_size=config.training.batch_size,
+        batch_size=eval_batch_size,
         shuffle=False,
         num_workers=config.data.num_workers,
         pin_memory=config.data.pin_memory,

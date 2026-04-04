@@ -36,7 +36,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from src.data.dataset import _IMAGE_EXTS
+from src.data.dataset import IMAGE_EXTS
 from src.data.transforms import get_transforms
 from src.inference.tta import tta_predict
 from src.models.segmentation import create_model
@@ -57,10 +57,9 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def preprocess(image_path: Path, config) -> torch.Tensor:
+def preprocess(image_path: Path, transform) -> torch.Tensor:
     """Load + preprocess một ảnh → (1, C, H, W) tensor."""
     image = np.array(Image.open(image_path).convert("RGB"))
-    transform = get_transforms("val", config)  # resize + normalize, no augment
     dummy_mask = np.zeros(image.shape[:2], dtype=np.float32)
     out = transform(image=image, mask=dummy_mask)
     tensor = out["image"]  # (C, H, W)
@@ -178,14 +177,14 @@ def main() -> None:
         image_paths = [input_path]
     elif input_path.is_dir():
         image_paths: list[Path] = []
-        for ext in sorted(_IMAGE_EXTS):
+        for ext in sorted(IMAGE_EXTS):
             image_paths.extend(sorted(input_path.glob(f"*{ext}")))
     else:
         log.error(f"Input path not found: {input_path}")
         sys.exit(1)
 
     if not image_paths:
-        exts = ", ".join(sorted(_IMAGE_EXTS))
+        exts = ", ".join(sorted(IMAGE_EXTS))
         log.error(f"No supported images found in {input_path}. Supported: {exts}")
         sys.exit(1)
 
@@ -202,10 +201,11 @@ def main() -> None:
     # Output dir
     out_dir = Path(args.output)
     out_dir.mkdir(parents=True, exist_ok=True)
+    transform = get_transforms("val", config)  # resize + normalize, no augment
 
     # Predict
     for img_path in tqdm(image_paths, desc="Predicting"):
-        tensor = preprocess(img_path, config)
+        tensor = preprocess(img_path, transform)
         mask = predict_single(model, tensor, device, args.threshold, args.tta)
 
         # Save mask
