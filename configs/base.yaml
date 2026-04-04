@@ -9,7 +9,7 @@ seed: 42
 # Model
 # -----------------------------------------------------------------------------
 model:
-  name: unet                          # "unet" | "sam2" | ...
+  name: unet                          # "unet" | "unet_original" | "deeplabv3" | "deeplabv3plus" | "transunet"
   encoder_name: resnet34
   encoder_weights: imagenet           # "imagenet" | null (train from scratch)
   decoder_channels: [256, 128, 64, 32, 16]
