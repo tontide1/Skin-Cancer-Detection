@@ -799,8 +799,12 @@ class TransUNet(nn.Module):
                 f"Expected posemb with shape (1, N, C), got {tuple(posemb.shape)}"
             )
 
-        if posemb.size(1) == ntok_new + 1:
-            posemb = posemb[:, 1:]
+        gs_old_check = int(math.sqrt(posemb.size(1)))
+        if gs_old_check * gs_old_check != posemb.size(1):
+            gs_old_minus_one = int(math.sqrt(max(0, posemb.size(1) - 1)))
+            if gs_old_minus_one * gs_old_minus_one == posemb.size(1) - 1:
+                posemb = posemb[:, 1:]
+
         if posemb.size(1) == ntok_new:
             return posemb
 
