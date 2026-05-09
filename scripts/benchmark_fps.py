@@ -29,7 +29,7 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Benchmark inference FPS",
         formatter_class=argparse.RawTextHelpFormatter,
@@ -37,8 +37,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", "-c", required=True, help="Path to experiment YAML config")
     parser.add_argument("--checkpoint", "-k", required=True, help="Path to best_model.pth")
     parser.add_argument("--device", "-d", default="cpu", help="Device to run benchmark on (default: cpu)")
+    parser.add_argument(
+        "--batch-sizes",
+        nargs="+",
+        type=int,
+        default=[1, 100, 1000],
+        help="Batch sizes to benchmark (default: 1 100 1000)",
+    )
     parser.add_argument("overrides", nargs="*", metavar="key.subkey=value")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main() -> None:
@@ -54,37 +61,46 @@ def main() -> None:
 
     # Model setup
     model = create_model(config)
-    
+
     ckpt = torch.load(args.checkpoint, map_location=device, weights_only=True)
     state = ckpt.get("model_state_dict", ckpt)
     load_state_dict_with_aux_compat(model, state, context=str(args.checkpoint))
-    
+
     model = model.to(device)
     model.eval()
-    
+
     log.info(f"Loaded model onto {device} and set to eval mode.")
 
     H, W = config.data.input_size
-    log.info(f"Creating dummy input tensor of shape (1, 3, {H}, {W}) on {device}")
-    x = torch.randn(1, 3, H, W, device=device)
 
-    log.info("Running benchmark...")
-    timer = benchmark.Timer(
-        stmt="with torch.inference_mode(): model(x)",
-        globals={"model": model, "x": x, "torch": torch}
-    )
-    
-    stats = timer.blocked_autorange(min_run_time=2.0)
-    
-    mean_latency = stats.mean
-    fps = 1.0 / mean_latency
-    
+    results = []
+    for bs in args.batch_sizes:
+        log.info(f"Benchmarking batch size {bs}...")
+        x = torch.randn(bs, 3, H, W, device=device)
+
+        timer = benchmark.Timer(
+            stmt="with torch.inference_mode(): model(x)",
+            globals={"model": model, "x": x, "torch": torch},
+        )
+
+        stats = timer.blocked_autorange(min_run_time=2.0)
+
+        mean_latency = stats.mean
+        throughput = bs / mean_latency
+        results.append((bs, mean_latency * 1000, throughput))
+
     print("\n--- Benchmark Results ---")
     print(f"Device      : {args.device}")
     print(f"Input size  : {H}x{W}")
-    print(f"Mean latency: {mean_latency * 1000:.2f} ms")
-    print(f"FPS         : {fps:.2f}")
-    print("-------------------------")
+    print("-" * 50)
+    print(f"{'Batch Size':<12} | {'Latency (ms)':>12} | {'Throughput (fps)':>16}")
+    print("-" * 50)
+
+    for bs, latency, fps in results:
+        print(f"{bs:<12} | {latency:>12.2f} | {fps:>16.2f}")
+
+    print("-" * 50)
+
 
 if __name__ == "__main__":
     main()
