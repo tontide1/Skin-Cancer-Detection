@@ -4,16 +4,23 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import logging
+import time
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+import torch
+from PIL import Image
 import yaml
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
+
+from src.data.dataset import IMAGE_EXTS
 
 logging.basicConfig(
     level=logging.INFO,
@@ -98,6 +105,19 @@ def load_model_entries(path: Path) -> list[ModelEntry]:
         )
 
     return entries
+
+
+def collect_image_paths(data_dir: Path, max_images: int | None = None) -> list[Path]:
+    """Collect supported image files recursively."""
+
+    paths = sorted(
+        path
+        for path in data_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in IMAGE_EXTS
+    )
+    if max_images is not None:
+        return paths[:max_images]
+    return paths
 
 
 def main() -> None:

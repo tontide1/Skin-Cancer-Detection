@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 import scripts.benchmark_inference as benchmark_inference
 
@@ -86,3 +87,31 @@ models:
 
     with pytest.raises(ValueError, match="checkpoint"):
         benchmark_inference.load_model_entries(mapping)
+
+
+def _write_image(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", (4, 4), color=(0, 0, 0)).save(path)
+
+
+def test_collect_image_paths_recurses_and_sorts_supported_extensions(tmp_path: Path) -> None:
+    _write_image(tmp_path / "b" / "second.png")
+    _write_image(tmp_path / "a" / "first.jpg")
+    (tmp_path / "ignore.txt").write_text("not an image", encoding="utf-8")
+
+    paths = benchmark_inference.collect_image_paths(tmp_path)
+
+    assert [p.relative_to(tmp_path).as_posix() for p in paths] == [
+        "a/first.jpg",
+        "b/second.png",
+    ]
+
+
+def test_collect_image_paths_applies_max_images_after_sort(tmp_path: Path) -> None:
+    _write_image(tmp_path / "c.jpg")
+    _write_image(tmp_path / "a.jpg")
+    _write_image(tmp_path / "b.jpg")
+
+    paths = benchmark_inference.collect_image_paths(tmp_path, max_images=2)
+
+    assert [p.name for p in paths] == ["a.jpg", "b.jpg"]
