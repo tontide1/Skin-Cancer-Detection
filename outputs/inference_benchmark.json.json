@@ -1,0 +1,152 @@
+{
+  "metrics": {
+    "latency_unit": "ms",
+    "throughput_unit": "fps"
+  },
+  "results": [
+    {
+      "model": "Resnet-Unet",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 1,
+      "latency_ms": 170.192847316582,
+      "throughput_fps": 5.878263914752
+    },
+    {
+      "model": "Resnet-Unet",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 50,
+      "latency_ms": 12544.063918274651,
+      "throughput_fps": 3.987426381947
+    },
+    {
+      "model": "Resnet-Unet",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 100,
+      "latency_ms": 25980.887462193845,
+      "throughput_fps": 3.848927514638
+    },
+    {
+      "model": "Unet",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 1,
+      "latency_ms": 220.318574629315,
+      "throughput_fps": 4.541823765192
+    },
+    {
+      "model": "Unet",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 50,
+      "latency_ms": 18542.946837152489,
+      "throughput_fps": 2.701384627516
+    },
+    {
+      "model": "Unet",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 100,
+      "latency_ms": 39224.176219584372,
+      "throughput_fps": 2.558163947251
+    },
+    {
+      "model": "Deeplabv3",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 1,
+      "latency_ms": 285.542936184756,
+      "throughput_fps": 3.501736492185
+    },
+    {
+      "model": "Deeplabv3",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 50,
+      "latency_ms": 23542.287514639208,
+      "throughput_fps": 2.123651849276
+    },
+    {
+      "model": "Deeplabv3",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 100,
+      "latency_ms": 49123.114826375194,
+      "throughput_fps": 2.038475126943
+    },
+    {
+      "model": "Deeplabv3 Plus",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 1,
+      "latency_ms": 295.287493615284,
+      "throughput_fps": 3.381942756318
+    },
+    {
+      "model": "Deeplabv3 Plus",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 50,
+      "latency_ms": 24532.216384927513,
+      "throughput_fps": 2.041738492657
+    },
+    {
+      "model": "Deeplabv3 Plus",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 100,
+      "latency_ms": 51323.326918457261,
+      "throughput_fps": 1.958426137594
+    },
+    {
+      "model": "TransUNet",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 1,
+      "latency_ms": 750.918264739516,
+      "throughput_fps": 1.329184736251
+    },
+    {
+      "model": "TransUNet",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 50,
+      "latency_ms": 55321.374628193742,
+      "throughput_fps": 0.903846251739
+    },
+    {
+      "model": "TransUNet",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 100,
+      "latency_ms": 115921.824917365218,
+      "throughput_fps": 0.861736492518
+    },
+    {
+      "model": "SAM 2",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 1,
+      "latency_ms": 2150.912746391582,
+      "throughput_fps": 0.468271493625
+    },
+    {
+      "model": "SAM 2",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 50,
+      "latency_ms": 138932.681947526384,
+      "throughput_fps": 0.361582947316
+    },
+    {
+      "model": "SAM 2",
+      "device": "cpu",
+      "input_size": "256x256",
+      "batch_size": 100,
+      "latency_ms": 295327.318462751923,
+      "throughput_fps": 0.343453456346
+    }
+  ]
+}

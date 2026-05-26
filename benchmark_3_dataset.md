@@ -25,5 +25,3 @@ dataset 3:
   test_dice_best:       0.9523
   test_iou_best @ best thr: 0.9136
   TTA:                     True
-
-# DEEPLABv3 MobileNet

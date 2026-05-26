@@ -1,0 +1,30 @@
+{
+  "split": "test",
+  "tta": true,
+  "loss": 0.07638117853931324,
+  "dice": 0.9274076263823671,
+  "iou": 0.8773404623933895,
+  "best_threshold": 0.5,
+  "best_dice_at_best_thr": 0.9274076263823671,
+  "best_iou_at_best_thr": 0.8773404623933895,
+  "test_dice": 0.9274076263823671,
+  "test_iou": 0.8773404623933895,
+  "test_dice_best": 0.9274076263823671,
+  "test_iou_best": 0.8773404623933895,
+  "threshold_report": 0.5,
+  "dice_stats": {
+    "mean": 0.9274076243449828,
+    "std": 0.10035165310396121,
+    "min": 0.2012759894132614,
+    "max": 0.9966329336166382,
+    "median": 0.9639173746109009
+  },
+  "iou_stats": {
+    "mean": 0.8773404703942126,
+    "std": 0.13735397173958153,
+    "min": 0.11189931631088257,
+    "max": 0.9932884573936462,
+    "median": 0.9303479790687561
+  },
+  "tta_loss_note": "loss computed from non-TTA logits for comparability"
+}
