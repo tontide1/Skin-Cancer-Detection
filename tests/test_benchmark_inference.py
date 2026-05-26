@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import numpy as np
+import torch
 from PIL import Image
 
 import scripts.benchmark_inference as benchmark_inference
@@ -115,3 +117,48 @@ def test_collect_image_paths_applies_max_images_after_sort(tmp_path: Path) -> No
     paths = benchmark_inference.collect_image_paths(tmp_path, max_images=2)
 
     assert [p.name for p in paths] == ["a.jpg", "b.jpg"]
+
+
+def test_preprocess_image_uses_supplied_transform(tmp_path: Path) -> None:
+    image_path = tmp_path / "sample.jpg"
+    Image.fromarray(np.zeros((10, 12, 3), dtype=np.uint8)).save(image_path)
+    calls = {"count": 0}
+
+    def fake_transform(*, image, mask):
+        calls["count"] += 1
+        assert image.shape == (10, 12, 3)
+        assert mask.shape == (10, 12)
+        return {"image": torch.ones((3, 8, 8), dtype=torch.float32)}
+
+    tensor = benchmark_inference.preprocess_image(image_path, fake_transform)
+
+    assert calls["count"] == 1
+    assert tensor.shape == (3, 8, 8)
+    assert tensor.dtype == torch.float32
+
+
+def test_make_batch_repeats_images_until_batch_size(tmp_path: Path, monkeypatch) -> None:
+    image_paths = [tmp_path / "a.jpg", tmp_path / "b.jpg"]
+    tensors = {
+        image_paths[0]: torch.zeros((3, 4, 4), dtype=torch.float32),
+        image_paths[1]: torch.ones((3, 4, 4), dtype=torch.float32),
+    }
+
+    monkeypatch.setattr(
+        benchmark_inference,
+        "preprocess_image",
+        lambda path, transform: tensors[path],
+    )
+
+    batch = benchmark_inference.make_batch(
+        image_paths=image_paths,
+        transform=object(),
+        batch_size=5,
+        device=torch.device("cpu"),
+    )
+
+    assert batch.shape == (5, 3, 4, 4)
+    assert torch.equal(batch[0], tensors[image_paths[0]])
+    assert torch.equal(batch[1], tensors[image_paths[1]])
+    assert torch.equal(batch[2], tensors[image_paths[0]])
+    assert torch.equal(batch[4], tensors[image_paths[0]])

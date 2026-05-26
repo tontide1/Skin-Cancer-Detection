@@ -120,6 +120,30 @@ def collect_image_paths(data_dir: Path, max_images: int | None = None) -> list[P
     return paths
 
 
+def preprocess_image(image_path: Path, transform) -> torch.Tensor:
+    """Load and preprocess one RGB image."""
+
+    image = np.array(Image.open(image_path).convert("RGB"))
+    dummy_mask = np.zeros(image.shape[:2], dtype=np.float32)
+    out = transform(image=image, mask=dummy_mask)
+    return out["image"]
+
+
+def make_batch(
+    image_paths: list[Path],
+    transform,
+    batch_size: int,
+    device: torch.device,
+) -> torch.Tensor:
+    """Create one benchmark batch, repeating images if needed."""
+
+    tensors = [
+        preprocess_image(image_paths[idx % len(image_paths)], transform)
+        for idx in range(batch_size)
+    ]
+    return torch.stack(tensors, dim=0).to(device)
+
+
 def main() -> None:
     """CLI entrypoint."""
 
