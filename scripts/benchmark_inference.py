@@ -21,12 +21,12 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from src.data.dataset import IMAGE_EXTS
-from src.data.transforms import get_transforms
-from src.models.segmentation import create_model
-from src.utils.checkpoint import load_state_dict_with_aux_compat
-from src.utils.config import load_config
-from src.utils.misc import set_seed
+from src.data.dataset import IMAGE_EXTS  # noqa: E402
+from src.data.transforms import get_transforms  # noqa: E402
+from src.models.segmentation import create_model  # noqa: E402
+from src.utils.checkpoint import load_state_dict_with_aux_compat  # noqa: E402
+from src.utils.config import load_config  # noqa: E402
+from src.utils.misc import set_seed  # noqa: E402
 
 logging.basicConfig(
     level=logging.INFO,
