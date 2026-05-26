@@ -162,3 +162,55 @@ def test_make_batch_repeats_images_until_batch_size(tmp_path: Path, monkeypatch)
     assert torch.equal(batch[1], tensors[image_paths[1]])
     assert torch.equal(batch[2], tensors[image_paths[0]])
     assert torch.equal(batch[4], tensors[image_paths[0]])
+
+
+def test_benchmark_batch_reports_batch_latency_and_throughput(monkeypatch) -> None:
+    class FakeModel(torch.nn.Module):
+        def forward(self, x):
+            return x
+
+    times = iter([10.0, 10.2])
+    monkeypatch.setattr(benchmark_inference.time, "perf_counter", lambda: next(times))
+    monkeypatch.setattr(benchmark_inference.gc, "collect", lambda: None)
+
+    result = benchmark_inference.benchmark_batch(
+        model=FakeModel(),
+        batch=torch.zeros((5, 3, 4, 4), dtype=torch.float32),
+        batch_size=5,
+        device=torch.device("cpu"),
+    )
+
+    assert result is not None
+    assert result.latency_ms == pytest.approx(200.0)
+    assert result.throughput_fps == pytest.approx(25.0)
+
+
+def test_benchmark_batch_skips_out_of_memory(monkeypatch) -> None:
+    class OOMModel(torch.nn.Module):
+        def forward(self, x):
+            raise RuntimeError("out of memory")
+
+    monkeypatch.setattr(benchmark_inference.gc, "collect", lambda: None)
+
+    result = benchmark_inference.benchmark_batch(
+        model=OOMModel(),
+        batch=torch.zeros((2, 3, 4, 4), dtype=torch.float32),
+        batch_size=2,
+        device=torch.device("cpu"),
+    )
+
+    assert result is None
+
+
+def test_benchmark_batch_reraises_non_oom_errors() -> None:
+    class BrokenModel(torch.nn.Module):
+        def forward(self, x):
+            raise RuntimeError("shape mismatch")
+
+    with pytest.raises(RuntimeError, match="shape mismatch"):
+        benchmark_inference.benchmark_batch(
+            model=BrokenModel(),
+            batch=torch.zeros((2, 3, 4, 4), dtype=torch.float32),
+            batch_size=2,
+            device=torch.device("cpu"),
+        )

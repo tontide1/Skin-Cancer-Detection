@@ -39,6 +39,14 @@ class ModelEntry:
     checkpoint: Path
 
 
+@dataclass(frozen=True)
+class BatchBenchmarkResult:
+    """Benchmark metrics for one batch."""
+
+    latency_ms: float
+    throughput_fps: float
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments."""
 
@@ -142,6 +150,48 @@ def make_batch(
         for idx in range(batch_size)
     ]
     return torch.stack(tensors, dim=0).to(device)
+
+
+def is_out_of_memory_error(exc: RuntimeError) -> bool:
+    """Return whether a runtime error is an out-of-memory failure."""
+
+    oom_error = getattr(torch.cuda, "OutOfMemoryError", RuntimeError)
+    return isinstance(exc, oom_error) or "out of memory" in str(exc).lower()
+
+
+def benchmark_batch(
+    model: torch.nn.Module,
+    batch: torch.Tensor,
+    batch_size: int,
+    device: torch.device,
+) -> BatchBenchmarkResult | None:
+    """Benchmark one prebuilt batch."""
+
+    try:
+        with torch.inference_mode():
+            model(batch)
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+
+        start = time.perf_counter()
+        with torch.inference_mode():
+            model(batch)
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+        elapsed = time.perf_counter() - start
+
+        latency_ms = elapsed * 1000.0
+        throughput_fps = batch_size / elapsed
+        return BatchBenchmarkResult(latency_ms=latency_ms, throughput_fps=throughput_fps)
+    except RuntimeError as exc:
+        if not is_out_of_memory_error(exc):
+            raise
+        log.warning("Skipping batch size %s due to OOM: %s", batch_size, exc)
+        return None
+    finally:
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
 
 def main() -> None:
