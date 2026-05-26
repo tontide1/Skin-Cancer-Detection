@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import json
 import logging
 import time
 import sys
@@ -192,6 +193,36 @@ def benchmark_batch(
         gc.collect()
         if device.type == "cuda":
             torch.cuda.empty_cache()
+
+
+def format_result_record(
+    entry: ModelEntry,
+    device: torch.device,
+    input_size: tuple[int, int],
+    batch_size: int,
+    result: BatchBenchmarkResult,
+) -> dict[str, object]:
+    """Format one benchmark result record for JSON output."""
+
+    height, width = input_size
+    return {
+        "model": entry.label,
+        "device": str(device),
+        "input_size": f"{height}x{width}",
+        "batch_size": batch_size,
+        "latency_ms": round(result.latency_ms, 2),
+        "throughput_fps": round(result.throughput_fps, 2),
+        "checkpoint": entry.checkpoint.as_posix(),
+    }
+
+
+def write_results_json(output_path: Path, payload: dict[str, object]) -> None:
+    """Write benchmark payload to JSON."""
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+        f.write("\n")
 
 
 def main() -> None:

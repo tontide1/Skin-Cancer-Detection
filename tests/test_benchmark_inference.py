@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pytest
 import numpy as np
@@ -214,3 +215,57 @@ def test_benchmark_batch_reraises_non_oom_errors() -> None:
             batch_size=2,
             device=torch.device("cpu"),
         )
+
+
+def test_format_result_record_uses_mapping_label() -> None:
+    entry = benchmark_inference.ModelEntry(
+        label="SAM 2",
+        config=Path("cfg.yaml"),
+        checkpoint=Path("outputs/sam2_vit/best_model.pth"),
+    )
+    result = benchmark_inference.BatchBenchmarkResult(latency_ms=250.0, throughput_fps=8.0)
+
+    record = benchmark_inference.format_result_record(
+        entry=entry,
+        device=torch.device("cpu"),
+        input_size=(256, 256),
+        batch_size=2,
+        result=result,
+    )
+
+    assert record == {
+        "model": "SAM 2",
+        "device": "cpu",
+        "input_size": "256x256",
+        "batch_size": 2,
+        "latency_ms": 250.0,
+        "throughput_fps": 8.0,
+        "checkpoint": "outputs/sam2_vit/best_model.pth",
+    }
+    assert "resolved_model_name" not in record
+    assert "warnings" not in record
+
+
+def test_write_results_json_creates_parent_and_file(tmp_path: Path) -> None:
+    output_path = tmp_path / "nested" / "benchmark.json"
+    payload = {
+        "device": "cpu",
+        "data_dir": "data",
+        "num_images": 1,
+        "batch_sizes": [1],
+        "results": [
+            {
+                "model": "Resnet-Unet",
+                "device": "cpu",
+                "input_size": "256x256",
+                "batch_size": 1,
+                "latency_ms": 10.0,
+                "throughput_fps": 100.0,
+                "checkpoint": "outputs/resnet34_unet/best_model.pth",
+            }
+        ],
+    }
+
+    benchmark_inference.write_results_json(output_path, payload)
+
+    assert json.loads(output_path.read_text(encoding="utf-8")) == payload
