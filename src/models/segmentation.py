@@ -217,6 +217,147 @@ def _build_deeplabv3plus(config) -> nn.Module:
     )
 
 
+def _build_transunet(config) -> nn.Module:
+    """TransUNet R50-ViT-B_16 builder.
+
+    Supported config fields:
+        - model.in_channels (must be 3)
+        - model.classes (must be 1)
+        - model.transunet_variant (only "r50_vit_b16" in v1)
+        - model.encoder_weights ("imagenet" or null)
+        - model.pretrained_path (required when encoder_weights="imagenet")
+        - model.decoder_channels (list/tuple of 4 positive ints)
+        - model.n_skip (int in [0, 3])
+        - model.skip_channels (optional list/tuple of 4 ints)
+        - model.vit_hidden_size (optional int)
+        - model.vit_mlp_dim (optional int)
+        - model.vit_num_heads (optional int)
+        - model.vit_num_layers (optional int)
+        - model.vit_dropout_rate (optional float)
+        - model.vit_attention_dropout_rate (optional float)
+
+    Informational-only fields inherited from base config:
+        - model.decoder_attention_type
+        - model.encoder_name
+    """
+    from pathlib import Path
+
+    from src.models.transunet import TransUNet, build_r50_vit_b16_config
+
+    m = config.model
+
+    if int(m.in_channels) != 3:
+        raise ValueError(
+            "TransUNet (R50-ViT-B_16) chỉ hỗ trợ model.in_channels=3 (RGB). "
+            f"Nhận được: {m.in_channels}"
+        )
+    if int(m.classes) != 1:
+        raise ValueError(
+            "Project hiện tại là binary segmentation nên TransUNet builder yêu cầu "
+            f"model.classes=1. Nhận được: {m.classes}"
+        )
+
+    variant = str(getattr(m, "transunet_variant", "r50_vit_b16")).lower()
+    if variant != "r50_vit_b16":
+        raise ValueError(
+            "TransUNet v1 chỉ hỗ trợ model.transunet_variant='r50_vit_b16'. "
+            f"Nhận được: {variant!r}"
+        )
+
+    decoder_channels = getattr(m, "decoder_channels", [256, 128, 64, 16])
+    if not isinstance(decoder_channels, (list, tuple)) or len(decoder_channels) != 4:
+        raise ValueError(
+            "TransUNet yêu cầu model.decoder_channels là list/tuple gồm 4 phần tử. "
+            f"Nhận được: {decoder_channels!r}"
+        )
+    decoder_channels = tuple(int(v) for v in decoder_channels)
+    if any(v <= 0 for v in decoder_channels):
+        raise ValueError(
+            "TransUNet yêu cầu mọi phần tử model.decoder_channels > 0. "
+            f"Nhận được: {decoder_channels!r}"
+        )
+
+    skip_channels = getattr(m, "skip_channels", [512, 256, 64, 16])
+    if not isinstance(skip_channels, (list, tuple)) or len(skip_channels) != 4:
+        raise ValueError(
+            "TransUNet yêu cầu model.skip_channels là list/tuple gồm 4 phần tử. "
+            f"Nhận được: {skip_channels!r}"
+        )
+    skip_channels = tuple(int(v) for v in skip_channels)
+
+    n_skip = int(getattr(m, "n_skip", 3))
+    if n_skip < 0 or n_skip > 3:
+        raise ValueError(
+            "TransUNet yêu cầu model.n_skip nằm trong [0, 3]. " f"Nhận được: {n_skip}"
+        )
+
+    input_size = getattr(config.data, "input_size", [256, 256])
+    if not isinstance(input_size, (list, tuple)) or len(input_size) != 2:
+        raise ValueError(
+            "TransUNet yêu cầu data.input_size có dạng [H, W]. "
+            f"Nhận được: {input_size!r}"
+        )
+    height, width = int(input_size[0]), int(input_size[1])
+    if height != width:
+        raise ValueError(
+            "TransUNet v1 yêu cầu input vuông để token grid là square. "
+            f"Nhận được: data.input_size=[{height}, {width}]"
+        )
+
+    decoder_attention_type = getattr(m, "decoder_attention_type", None)
+    if decoder_attention_type is not None:
+        _log.warning("transunet ignores model.decoder_attention_type=%r.", decoder_attention_type)
+
+    encoder_name = getattr(m, "encoder_name", None)
+    if encoder_name not in (None, "r50_vit_b16"):
+        _log.warning(
+            "_build_transunet chỉ build R50-ViT-B_16. encoder_name=%r bị ignore.",
+            encoder_name,
+        )
+
+    model_cfg = build_r50_vit_b16_config(
+        n_classes=1,
+        decoder_channels=decoder_channels,
+        n_skip=n_skip,
+        hidden_size=int(getattr(m, "vit_hidden_size", 768)),
+        mlp_dim=int(getattr(m, "vit_mlp_dim", 3072)),
+        num_heads=int(getattr(m, "vit_num_heads", 12)),
+        num_layers=int(getattr(m, "vit_num_layers", 12)),
+        dropout_rate=float(getattr(m, "vit_dropout_rate", 0.1)),
+        attention_dropout_rate=float(getattr(m, "vit_attention_dropout_rate", 0.0)),
+        skip_channels=skip_channels,
+    )
+    model = TransUNet(config=model_cfg, img_size=(height, width), in_channels=3, vis=False)
+
+    encoder_weights = m.encoder_weights
+    if isinstance(encoder_weights, str):
+        encoder_weights = encoder_weights.lower()
+
+    if encoder_weights == "imagenet":
+        pretrained_path = getattr(m, "pretrained_path", None)
+        if pretrained_path is None:
+            raise ValueError(
+                "TransUNet với encoder_weights='imagenet' yêu cầu model.pretrained_path "
+                "trỏ tới file R50+ViT-B_16.npz"
+            )
+        ckpt_path = Path(pretrained_path)
+        if not ckpt_path.exists():
+            raise ValueError(
+                "TransUNet pretrained checkpoint không tồn tại tại model.pretrained_path: "
+                f"{ckpt_path}"
+            )
+        model.load_pretrained_from_npz(ckpt_path)
+    elif encoder_weights is None:
+        _log.warning("TransUNet sẽ train from scratch vì model.encoder_weights=null.")
+    else:
+        raise ValueError(
+            "TransUNet chỉ hỗ trợ model.encoder_weights='imagenet' hoặc null. "
+            f"Nhận được: {m.encoder_weights!r}"
+        )
+
+    return model
+
+
 # =============================================================================
 # Factory
 # =============================================================================
@@ -226,6 +367,7 @@ _REGISTRY = {
     "unet_original": _build_unet_original,
     "deeplabv3": _build_deeplabv3,
     "deeplabv3plus": _build_deeplabv3plus,
+    "transunet": _build_transunet,
 }
 
 

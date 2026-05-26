@@ -30,7 +30,7 @@ from torch.utils.data import Dataset
 log = logging.getLogger(__name__)
 
 # Supported image extensions (case-insensitive)
-_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff"}
 
 
 class ISICDataset(Dataset):
@@ -108,11 +108,11 @@ class ISICDataset(Dataset):
         # Build a lookup: mask stem (lower-case) → mask path
         mask_lookup: dict[str, Path] = {}
         for mask_path in sorted(self.mask_dir.iterdir()):
-            if mask_path.suffix.lower() in _IMAGE_EXTS:
+            if mask_path.suffix.lower() in IMAGE_EXTS:
                 mask_lookup[mask_path.stem.lower()] = mask_path
 
         for img_path in sorted(self.img_dir.iterdir()):
-            if img_path.suffix.lower() not in _IMAGE_EXTS:
+            if img_path.suffix.lower() not in IMAGE_EXTS:
                 continue
 
             stem = img_path.stem.lower()

@@ -80,6 +80,11 @@ class _NoOpLogger:
         return
 
 
+def _resolve_find_unused_parameters(config) -> bool:
+    """Resolve DDP find_unused_parameters from config with safe default."""
+    return bool(getattr(config.training, "find_unused_parameters", False))
+
+
 def _init_runtime(device_mode: str) -> tuple[torch.device, DistributedContext]:
     """
     Initialize single-GPU or torchrun-based DDP runtime.
@@ -261,7 +266,7 @@ def main() -> None:
                 model,
                 device_ids=[dist_ctx.local_rank],
                 output_device=dist_ctx.local_rank,
-                find_unused_parameters=True,
+                find_unused_parameters=_resolve_find_unused_parameters(config),
             )
 
         model_ref = model.module if hasattr(model, "module") else model

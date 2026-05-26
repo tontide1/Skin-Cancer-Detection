@@ -1,4 +1,5 @@
 #my ignore
+.codex/
 stage-1-segmentation/data/
 stage-2-classification/data/
 *.zip
@@ -11,7 +12,7 @@ data/ISIC2018_Task1-2_Training_Input
 data/ISIC2018_Task1-2_Validation_Input
 data/processed
 data/
-
+.opencode/
 # Project data & large model outputs
 outputs/**/*.pth
 outputs/**/*.pt

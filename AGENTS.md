@@ -4,7 +4,7 @@
 
 Binary **skin lesion segmentation** on the [ISIC 2018 Challenge – Task 1](https://challenge.isic-archive.com/landing/2018/) dataset.
 
-**Current Best:** U-Net + ResNet34 + SCSE attention (SMP) — Test Dice **0.9021** | IoU **0.8368** (epoch 41)
+**Current Best:** U-Net + ResNet34 + SCSE attention (SMP) — Test Dice **0.9466** | IoU **0.9055**
 **Registered models:** `"unet"`, `"unet_original"`, `"deeplabv3"` (MobileNetV3-Large, torchvision), `"deeplabv3plus"` (SMP)
 **Goal:** Dice > 0.95, then deploy as FastAPI web app.
 
@@ -14,7 +14,7 @@ Binary **skin lesion segmentation** on the [ISIC 2018 Challenge – Task 1](http
 
 | Component | Details |
 |---|---|
-| Language | Python 3.11 (Conda env: `CV`) |
+| Language | Python 3.12 (Conda env: `cv`) |
 | DL Framework | PyTorch 2.x + AMP (`torch.amp`) |
 | Segmentation | `segmentation-models-pytorch >= 0.3` (SMP) |
 | Augmentation | `albumentations >= 1.3` |
@@ -27,95 +27,30 @@ Binary **skin lesion segmentation** on the [ISIC 2018 Challenge – Task 1](http
 ## Commands Reference
 
 ```bash
-# Environment (Conda env is "CV", NOT "skin-cancer")
-conda activate CV
-pip install -e .
+# Environment
+conda activate cv
+pip install -e ".[dev]"
 
-# Lint (check code style)
+# Lint
 ruff check src/ scripts/ tests/
 ruff check src/ scripts/ tests/ --fix  # auto-fix
 
-# Data preparation (new dataset structure - HA10000 remove-hair)
-# Input: data/data-HA10000-remove-hair/remove-hair/images + masks/
-# Output: data/processed/train|val|test/images + masks/
-python scripts/prepare_data.py \
-    --data-dir data/data-HA10000-remove-hair \
-    --out-dir data/processed
-
-# Custom split ratios (default: 80/10/10)
-python scripts/prepare_data.py \
-    --data-dir data/data-HA10000-remove-hair \
-    --out-dir data/processed \
-    --train-ratio 0.8 --val-ratio 0.1 --test-ratio 0.1 --seed 42
+# Data preparation
+python scripts/prepare_data.py --data-dir data/data-HA10000-remove-hair --out-dir data/processed
 
 # Train
 python scripts/train.py --config configs/experiments/resnet34_unet_v1.yaml
 python scripts/train.py --config configs/experiments/resnet34_unet_v1.yaml \
     training.batch_size=32 model.encoder_name=efficientnet-b4 logging.use_wandb=false
-python scripts/train.py --config configs/experiments/unet_original_v1.yaml
-python scripts/train.py --config configs/experiments/resnet50_deeplabv3plus_v1.yaml
 
 # Evaluate (TTA + threshold search)
-python scripts/evaluate.py \
-    --config configs/experiments/resnet34_unet_v1.yaml \
+python scripts/evaluate.py --config configs/experiments/resnet34_unet_v1.yaml \
     --checkpoint outputs/resnet34_unet_v1/best_model.pth
-python scripts/evaluate.py \
-    --config configs/experiments/resnet50_deeplabv3plus_v1.yaml \
-    --checkpoint outputs/resnet50_deeplabv3plus_v1/best_model.pth
 
 # Predict (3-panel overlay: original | mask | overlay)
-python scripts/predict.py \
-    --config configs/experiments/resnet34_unet_v1.yaml \
+python scripts/predict.py --config configs/experiments/resnet34_unet_v1.yaml \
     --input data/processed/test/images/ISIC_0024306.jpg \
     --checkpoint outputs/resnet34_unet_v1/best_model.pth --overlay --tta
-```
-
-### Kaggle Training & Evaluation
-
-```bash
-# Train on Kaggle (2-GPU T4)
-%cd /kaggle/working
-!git clone https://github.com/tontiphan/Skin-Cancer-Detection.git
-%cd Skin-Cancer-Detection
-!git checkout stage1
-!pip install -r requirements.txt -q
-!torchrun --standalone --nnodes=1 --nproc_per_node=2 scripts/train.py \
-  --device-mode ddp \
-  --config configs/experiments/resnet34_unet_kaggle_t4.yaml \
-  data.root=/kaggle/input/datasets/tntiphan/isic-2018-task-1 \
-  output.dir=/kaggle/working \
-  logging.use_wandb=false
-
-# Evaluate on Kaggle test set
-!python scripts/evaluate.py \
-  --config configs/experiments/resnet34_unet_kaggle_t4.yaml \
-  --checkpoint /kaggle/working/resnet34_unet_kaggle_t4/best_model.pth \
-  data.root=/kaggle/input/datasets/tntiphan/isic-2018-task-1 \
-  output.dir=/kaggle/working \
-  logging.use_wandb=false
-
-# Train DeepLabV3+ (ResNet50) on Kaggle (2-GPU T4)
-# training.batch_size=16/process => global batch size = 32
-!torchrun --standalone --nnodes=1 --nproc_per_node=2 scripts/train.py \
-  --device-mode ddp \
-  --config configs/experiments/resnet50_deeplabv3plus_v1.yaml \
-  data.root=/kaggle/input/datasets/tntiphan/isic-2018-task-1 \
-  output.dir=/kaggle/working \
-  logging.use_wandb=false \
-  training.batch_size=16 \
-  training.deterministic=false \
-  data.num_workers=4
-
-# Evaluate DeepLabV3+ on Kaggle test set
-!python scripts/evaluate.py \
-  --config configs/experiments/resnet50_deeplabv3plus_v1.yaml \
-  --checkpoint /kaggle/working/resnet50_deeplabv3plus_v1/best_model.pth \
-  --split test \
-  data.root=/kaggle/input/datasets/tntiphan/isic-2018-task-1 \
-  output.dir=/kaggle/working \
-  logging.use_wandb=false \
-  training.batch_size=16 \
-  data.num_workers=4
 ```
 
 ### Testing
@@ -126,14 +61,9 @@ pytest tests/ -v
 
 # Run a single test FILE
 pytest tests/test_trainer_robustness.py -v
-pytest tests/models/test_deeplabv3_factory.py -v
-pytest tests/models/test_unet_original_factory.py -v
-pytest tests/models/test_deeplabv3plus_factory.py -v
 
 # Run a single test FUNCTION
 pytest tests/test_trainer_robustness.py::test_warmup_preserves_differential_lr_ratio -v
-pytest tests/models/test_deeplabv3_factory.py::test_deeplabv3_factory_uses_backbone_imagenet_weights -v
-pytest tests/models/test_deeplabv3plus_factory.py::test_deeplabv3plus_factory_passes_expected_args -v
 
 # Skip integration tests (require real torchvision/GPU)
 pytest tests/ -v --ignore=tests/models/test_deeplabv3_integration.py
@@ -154,32 +84,34 @@ All architectures **MUST** be registered in `src/models/segmentation.py` via `_R
 Every experiment **MUST** have its own YAML in `configs/experiments/` with `_base_: ../base.yaml`.
 **Never** modify `base.yaml` for experiment-specific settings.
 **Do NOT** set `output.dir` in experiment YAMLs — `train.py` builds `outputs/<experiment_name>/`
-automatically. Setting both causes double-nesting (e.g. `outputs/my_exp/my_exp/`).
+automatically. Setting both causes double-nesting.
 
 ### 3. Metric Reporting (mandatory 5-key contract)
-All evaluation results **MUST** contain all five keys — no exceptions:
-- `{split}_dice` — Dice at threshold 0.5 (e.g. `test_dice`, `val_dice`)
+All evaluation results **MUST** contain all five keys:
+- `{split}_dice` — Dice at threshold 0.5
 - `{split}_iou` — IoU at threshold 0.5
 - `{split}_dice_best` — Dice at optimal threshold (grid search 0.30–0.70, step 0.05)
 - `{split}_iou_best` — IoU at that same optimal threshold
 - `best_threshold` — the optimal threshold value
 
-Generic aliases (`dice`, `iou`, `best_dice_at_best_thr`, `best_iou_at_best_thr`) are kept in the
-return dict for backward compatibility but are **not** part of the required contract.
-
 ### 4. Reproducibility
 - `seed: 42` in every YAML; call `set_seed(config.seed)` at the start of every script.
 - Save `config.model.to_dict()` as `model_config` key in every checkpoint.
 
-### 5. Loss Function
-Default: `CombinedLoss(0.5 × FocalLoss(γ=2) + 0.5 × SoftDiceLoss)`.
-New losses → add **only** to `src/losses/segmentation.py`, wire via `training.loss` in config.
-
-### 6. Data Augmentation
+### 5. Data Augmentation
 - Train augmentations live **only** in `src/data/transforms.py:get_transforms("train", config)`.
 - Val/test: `Resize + Normalize + ToTensorV2` only — **zero** augmentation.
 - `get_transforms()` raises `ValueError` for any unrecognized split name (fail-fast).
 - ImageNet normalization: `mean=[0.485, 0.456, 0.406]`, `std=[0.229, 0.224, 0.225]`.
+
+### 6. DDP Configuration
+- `training.find_unused_parameters` defaults to `false`. Only set `true` for models with
+  conditional unused branches. Resolved via `_resolve_find_unused_parameters()` in `train.py`.
+
+### 7. Eval Batch Size
+- Both `train.py` (val loader) and `evaluate.py` use `data.val_batch_size_multiplier`
+  (default `2`) to compute eval batch size: `training.batch_size * multiplier`.
+- Resolved via `_resolve_eval_batch_size()` in `evaluate.py`.
 
 ---
 
@@ -205,7 +137,7 @@ Do **not** use `from typing import Dict/List/Tuple` — use lowercase builtins (
 | Classes | `PascalCase` | `ISICDataset`, `CombinedLoss`, `EarlyStopping` |
 | Functions / methods | `snake_case` | `dice_coefficient`, `build_dataloaders` |
 | Private helpers | `_leading_underscore` | `_build_unet`, `_deep_merge`, `_cast_value` |
-| Module-level constants | `_SCREAMING_SNAKE` | `_REGISTRY`, `_REPO_ROOT`, `_VAL_METRIC_SEMANTICS` |
+| Shared constants | `SCREAMING_SNAKE` (public) or `_SCREAMING_SNAKE` (internal) | `IMAGE_EXTS`, `_REGISTRY` |
 | Config keys | `snake_case` | `encoder_name`, `batch_size` |
 
 ### Docstrings
@@ -215,7 +147,7 @@ Comments may be in English or Vietnamese — both are acceptable.
 ### Error Handling
 - **Scripts (missing path):** `log.error(...) + sys.exit(1)`
 - **Factory (unknown key):** `raise ValueError(f"... Available: {list(_REGISTRY.keys())}")`
-- **Builder constraints:** `raise ValueError` with a clear message (e.g. unsupported `in_channels`)
+- **Builder constraints:** `raise ValueError` with a clear message
 - **Informational-only fields:** `logging.getLogger(__name__).warning(...)` — warn, do not raise
 - **Optional deps (W&B):** `try/except ImportError` → `logger.warning()` + graceful fallback
 - **Checkpoint loading:** `.get("model_state_dict", ckpt)` to handle both formats; use
@@ -244,9 +176,6 @@ model_ref = model.module if hasattr(model, "module") else model
 5. Create `configs/experiments/<name>_v1.yaml` (`_base_: ../base.yaml`, `model.name: <name>`)
 6. Add unit tests in `tests/models/` (mock heavy deps with `monkeypatch`; skip with `importorskip`)
 7. Train → Evaluate → report all 5 metric keys
-
-**Candidate architectures:** `efficientnet-b4/b6` (SMP, drop-in), `mit_b2/b4` (SegFormer),
-SAM fine-tuned on ISIC, Swin-UNet / TransUNet.
 
 ---
 
