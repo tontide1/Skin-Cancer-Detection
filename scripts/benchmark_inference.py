@@ -22,6 +22,11 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from src.data.dataset import IMAGE_EXTS
+from src.data.transforms import get_transforms
+from src.models.segmentation import create_model
+from src.utils.checkpoint import load_state_dict_with_aux_compat
+from src.utils.config import load_config
+from src.utils.misc import set_seed
 
 logging.basicConfig(
     level=logging.INFO,
@@ -225,12 +230,111 @@ def write_results_json(output_path: Path, payload: dict[str, object]) -> None:
         f.write("\n")
 
 
+def load_model_for_entry(entry: ModelEntry, device: torch.device) -> tuple[object, torch.nn.Module]:
+    """Load config, model, and checkpoint for one mapping entry."""
+
+    config = load_config(entry.config)
+    set_seed(config.seed)
+
+    model = create_model(config).to(device)
+    ckpt = torch.load(entry.checkpoint, map_location=device, weights_only=True)
+    state = ckpt.get("model_state_dict", ckpt)
+    load_state_dict_with_aux_compat(model, state, context=str(entry.checkpoint))
+    model.eval()
+    return config, model
+
+
+def run_benchmark(
+    entries: list[ModelEntry],
+    data_dir: Path,
+    output_path: Path,
+    batch_sizes: list[int],
+    device: torch.device,
+    max_images: int | None,
+    image_paths: list[Path] | None = None,
+) -> dict[str, object]:
+    """Run the complete benchmark and write JSON output."""
+
+    images = image_paths if image_paths is not None else collect_image_paths(data_dir, max_images=max_images)
+    results: list[dict[str, object]] = []
+
+    for entry in entries:
+        log.info("Benchmarking model: %s", entry.label)
+        config, model = load_model_for_entry(entry, device)
+        height, width = (int(v) for v in config.data.input_size)
+        transform = get_transforms("val", config)
+
+        for batch_size in batch_sizes:
+            log.info("Benchmarking %s batch_size=%s", entry.label, batch_size)
+            batch = make_batch(images, transform, batch_size, device)
+            result = benchmark_batch(model, batch, batch_size, device)
+            if result is None:
+                continue
+            results.append(
+                format_result_record(
+                    entry=entry,
+                    device=device,
+                    input_size=(height, width),
+                    batch_size=batch_size,
+                    result=result,
+                )
+            )
+
+    payload: dict[str, object] = {
+        "device": str(device),
+        "data_dir": data_dir.as_posix(),
+        "num_images": len(images),
+        "batch_sizes": batch_sizes,
+        "results": results,
+    }
+    write_results_json(output_path, payload)
+    return payload
+
+
 def main() -> None:
     """CLI entrypoint."""
 
     args = parse_args()
-    _ = args
-    raise SystemExit("benchmark implementation is added in later tasks")
+    models_path = Path(args.models)
+    data_dir = Path(args.data_dir)
+    output_path = Path(args.output)
+
+    if not models_path.exists():
+        log.error("Model mapping file not found: %s", models_path)
+        sys.exit(1)
+    if not data_dir.exists():
+        log.error("Data directory not found: %s", data_dir)
+        sys.exit(1)
+
+    try:
+        entries = load_model_entries(models_path)
+    except ValueError as exc:
+        log.error("Invalid model mapping file %s: %s", models_path, exc)
+        sys.exit(1)
+
+    for entry in entries:
+        if not entry.config.exists():
+            log.error("Config not found for %s: %s", entry.label, entry.config)
+            sys.exit(1)
+        if not entry.checkpoint.exists():
+            log.error("Checkpoint not found for %s: %s", entry.label, entry.checkpoint)
+            sys.exit(1)
+
+    image_paths = collect_image_paths(data_dir, max_images=args.max_images)
+    if not image_paths:
+        log.error("No supported images found under: %s", data_dir)
+        sys.exit(1)
+
+    run_benchmark(
+        entries=entries,
+        data_dir=data_dir,
+        output_path=output_path,
+        batch_sizes=args.batch_sizes,
+        device=torch.device(args.device),
+        max_images=args.max_images,
+        image_paths=image_paths,
+    )
+    log.info("Benchmark results saved: %s", output_path)
 
 
 if __name__ == "__main__":

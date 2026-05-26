@@ -269,3 +269,79 @@ def test_write_results_json_creates_parent_and_file(tmp_path: Path) -> None:
     benchmark_inference.write_results_json(output_path, payload)
 
     assert json.loads(output_path.read_text(encoding="utf-8")) == payload
+
+
+def test_run_benchmark_orchestrates_entries_batches_and_payload(tmp_path: Path, monkeypatch) -> None:
+    data_dir = tmp_path / "data"
+    _write_image(data_dir / "sample.jpg")
+    output_path = tmp_path / "benchmark.json"
+    entry = benchmark_inference.ModelEntry(
+        label="SAM 2",
+        config=Path("cfg.yaml"),
+        checkpoint=Path("ckpt.pth"),
+    )
+
+    class FakeConfig:
+        seed = 42
+
+        class data:
+            input_size = [256, 256]
+
+    class FakeModel(torch.nn.Module):
+        def forward(self, x):
+            return x
+
+    calls = {"set_seed": 0, "load_state": 0}
+
+    monkeypatch.setattr(benchmark_inference, "load_config", lambda path: FakeConfig())
+    monkeypatch.setattr(
+        benchmark_inference,
+        "set_seed",
+        lambda seed: calls.__setitem__("set_seed", calls["set_seed"] + 1),
+    )
+    monkeypatch.setattr(benchmark_inference, "create_model", lambda config: FakeModel())
+    monkeypatch.setattr(
+        benchmark_inference.torch,
+        "load",
+        lambda path, **kwargs: {"model_state_dict": {}},
+    )
+    monkeypatch.setattr(
+        benchmark_inference,
+        "load_state_dict_with_aux_compat",
+        lambda model, state, context: calls.__setitem__("load_state", calls["load_state"] + 1),
+    )
+    monkeypatch.setattr(benchmark_inference, "get_transforms", lambda split, config: object())
+    monkeypatch.setattr(
+        benchmark_inference,
+        "make_batch",
+        lambda image_paths, transform, batch_size, device: torch.zeros(
+            (batch_size, 3, 4, 4),
+            dtype=torch.float32,
+        ),
+    )
+    monkeypatch.setattr(
+        benchmark_inference,
+        "benchmark_batch",
+        lambda model, batch, batch_size, device: benchmark_inference.BatchBenchmarkResult(
+            latency_ms=100.0,
+            throughput_fps=float(batch_size) * 10.0,
+        ),
+    )
+
+    payload = benchmark_inference.run_benchmark(
+        entries=[entry],
+        data_dir=data_dir,
+        output_path=output_path,
+        batch_sizes=[1, 2],
+        device=torch.device("cpu"),
+        max_images=None,
+    )
+
+    assert calls == {"set_seed": 1, "load_state": 1}
+    assert payload["device"] == "cpu"
+    assert payload["data_dir"] == data_dir.as_posix()
+    assert payload["num_images"] == 1
+    assert payload["batch_sizes"] == [1, 2]
+    assert [record["batch_size"] for record in payload["results"]] == [1, 2]
+    assert [record["model"] for record in payload["results"]] == ["SAM 2", "SAM 2"]
+    assert output_path.exists()
