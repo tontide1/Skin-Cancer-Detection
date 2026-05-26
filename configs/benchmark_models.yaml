@@ -1,0 +1,24 @@
+models:
+  - label: Resnet-Unet
+    config: configs/experiments/resnet34_unet_v1.yaml
+    checkpoint: outputs/resnet34_unet/best_model.pth
+
+  - label: Unet
+    config: configs/experiments/unet_original_v1.yaml
+    checkpoint: outputs/unet_original_v1/best_model.pth
+
+  - label: Deeplabv3
+    config: configs/experiments/mobilenetv3_deeplabv3_v1.yaml
+    checkpoint: outputs/mobilenetv3_deeplabv3_v1/best_model.pth
+
+  - label: Deeplabv3 Plus
+    config: configs/experiments/resnet50_deeplabv3plus_v1.yaml
+    checkpoint: outputs/deeplabv3_plus/best_model.pth
+
+  - label: TransUNet
+    config: configs/experiments/transunet_r50_vitb16_v1.yaml
+    checkpoint: outputs/trans_unet_vit/best_model.pth
+
+  - label: SAM 2
+    config: configs/experiments/mobilenetv3_deeplabv3_v1.yaml
+    checkpoint: outputs/sam2_vit/best_model.pth
